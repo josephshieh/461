@@ -111,7 +111,12 @@ class Send implements Runnable {
 				// Command: p
 				// Send a Probe to the registration service and display an indication of whether or not it succeeded.
 
-				if (command.startsWith("r")) {
+				if (command.startsWith("r")) { //----- register -----------------------------------------------------
+/////////////////////////////////////// TODO: handle addr already in use exception==> java.net.BindException
+/////////////////////////////////////// TODO: send exactly message size: no trailing 0's
+/////////////////////////////////////// TODO:if a packet is re-sent, all copies carry the originally assigned sequence number
+/////////////////////////////////////// TODO:the sequence numbers (eventually) wrap.
+					int msgLength = 0;
 					String[] args = command.split(" ");
 					if (args.length != 4) {
 						usage("r");
@@ -128,6 +133,7 @@ class Send implements Runnable {
 					m[1] = (byte) 0x61;
 					m[2] = (byte) sequenceNum;
 					m[3] = (byte) 0x01; // Register
+					msgLength += 4;
 					String ip;
 					byte[] ipBytes;
 					try {
@@ -137,25 +143,30 @@ class Send implements Runnable {
 						m[5] = ipBytes[1];
 						m[6] = ipBytes[2];
 						m[7] = ipBytes[3];
+						msgLength += 4;
 					} catch (UnknownHostException e) {
 						e.printStackTrace();
 						System.exit(1);
 					}
 					m[8] = (byte) (portnum & 0xFF); // Service port number
 					m[9] = (byte) ((portnum >> 8) & 0xFF);
+					msgLength += 2;
 					byte[] dataBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
 							.putLong(Long.parseLong(serviceData)).array();
 					m[10] = dataBytes[4]; // Service data
 					m[11] = dataBytes[5];
 					m[12] = dataBytes[6];
 					m[13] = dataBytes[7];
+					msgLength += 4;
 					int len = serviceName.getBytes().length;
 					m[14] = (byte) len;
+					msgLength += 1;
 					byte[] serviceNameBytes = serviceName.getBytes();
 					for (int i = 0; i < len; i ++) {
 						m[15 + i] = serviceNameBytes[i];
 					}
-					DatagramPacket packet = new DatagramPacket(m, m.length, this.destAddr, this.destPort);
+					msgLength += len;
+					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 					try {
 						socket.send(packet);
 						this.sequenceNum ++;
@@ -163,31 +174,130 @@ class Send implements Runnable {
 						e.printStackTrace();
 					}
 
-					// Start listening to shit
+					// Listen for server response; expecting an Registered message with lifetime of connection
 
-				} else if (command.startsWith("u")) {
+				} else if (command.startsWith("u")) { //----- unregister -----------------------------------------------------
+					int msgLength = 0;
+					String[] args = command.split(" ");
+					if (args.length != 2) {
+						usage("u");
+						continue;
+					}
+					int portnum = Integer.parseInt(args[1]);
+					if (socket == null) {
+						socket = new DatagramSocket(portnum);
+					}
+					byte[] m = new byte[1000];
+					m[0] = (byte) 0xC4;
+					m[1] = (byte) 0x61;
+					m[2] = (byte) sequenceNum;
+					m[3] = (byte) 0x05; // Unregister
+					msgLength += 4;
+					String ip;
+					byte[] ipBytes;
+					try {
+						ip = InetAddress.getLocalHost().getHostAddress();
+						ipBytes = ip.getBytes();
+						m[4] = ipBytes[0]; // Service ip
+						m[5] = ipBytes[1];
+						m[6] = ipBytes[2];
+						m[7] = ipBytes[3];
+						msgLength += 4;
+					} catch (UnknownHostException e) {
+						e.printStackTrace();
+						System.exit(1);
+					}
+					m[8] = (byte) (portnum & 0xFF); // Service port number
+					m[9] = (byte) ((portnum >> 8) & 0xFF);
+					msgLength += 2;
+					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
+					try {
+						socket.send(packet);
+						this.sequenceNum ++;
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
 
-				} else if (command.startsWith("f")) {
+					// Listen for server response; expecting an ACK message
+				} else if (command.startsWith("f")) { //----- fetch -----------------------------------------------------
+					int msgLength = 0;
+					String[] args = command.split(" ");
+					if (args.length != 1) { // ? <name prefix> optional parameter?
+						usage("f");
+						continue;
+					}
+					byte[] m = new byte[1000];
+					m[0] = (byte) 0xC4;
+					m[1] = (byte) 0x61;
+					m[2] = (byte) sequenceNum;
+					m[3] = (byte) 0x03; // Fetch
+					msgLength += 4;
+					int len = 0;
+					m[4] = (byte) len;
+					msgLength += 1;
+					msgLength += len;
+					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
+					if (socket == null) {
+						System.out.println("No socket. Please register first.");
+						continue;
+					}
+					try {
+						socket.send(packet);
+						this.sequenceNum ++;
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				} else if (command.startsWith("p")) { //----- probe -----------------------------------------------------
+					int msgLength = 0;
+					String[] args = command.split(" ");
+					if (args.length != 1) {
+						usage("p");
+						continue;
+					}
+					
+					if (socket == null) {
+						System.out.println("No socket. Please register first.");
+						continue;
+					}
+					byte[] m = new byte[1000];
+					m[0] = (byte) 0xC4;
+					m[1] = (byte) 0x61;
+					m[2] = (byte) sequenceNum;
+					m[3] = (byte) 0x06; // Probe
+					msgLength += 4;
+					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
+					try {
+						socket.send(packet);
+						this.sequenceNum ++;
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
 
-				} else if (command.startsWith("p")) {
-
+					// Listen for server response; expecting an ACK message
 				} else {
 					usageAll();
 				}
 				System.out.println(prompt);
 			}
 		} catch (NumberFormatException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
-		}
+		} finally {
+            if (socket != null)
+                socket.close();
+        }
 	}
 }
 
 
 class Listen implements Runnable {
+
+
+	public Listen(int port) {
+		
+	}
+	
 	@Override
 	public void run() {
 
