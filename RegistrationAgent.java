@@ -11,9 +11,11 @@
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.BindException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -89,7 +91,8 @@ class Send implements Runnable {
 		// This reader will read a line of input at a time from stdin and send it to the client
 		BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
 		String command = "";
-		DatagramSocket socket = null;
+		DatagramSocket sendSocket = null;
+		DatagramSocket listenSocket = null;
 		try {
 			while(!(command = input.readLine()).equals("q")) { // quit if the user types "q"
 				// Determine which command it is and execute accordingly
@@ -123,8 +126,14 @@ class Send implements Runnable {
 						continue;
 					}
 					int portnum = Integer.parseInt(args[1]);
-					if (socket == null) {
-						socket = new DatagramSocket(portnum);
+					if (sendSocket == null) {
+						try {
+							sendSocket = new DatagramSocket(portnum);
+							listenSocket = new DatagramSocket(portnum + 1);
+						} catch (BindException e) {
+							System.out.println("Can't reserve two consecutive ports. Please try another port.");
+							continue;
+						}
 					}
 					String serviceData = args[2];
 					String serviceName = args[3];
@@ -167,14 +176,20 @@ class Send implements Runnable {
 					}
 					msgLength += len;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
+					
+					// Create a thread that will listen for responses; the port will be the same port we send
+					Listen l = new Listen(sendSocket);
+					Thread t2 = new Thread(l);
+					t2.start();
 					try {
-						socket.send(packet);
+						sendSocket.send(packet);
 						this.sequenceNum ++;
+						// Listen for server response; expecting an Registered message with lifetime of connection
 					} catch (IOException e) {
 						e.printStackTrace();
 					}
 
-					// Listen for server response; expecting an Registered message with lifetime of connection
+					
 
 				} else if (command.startsWith("u")) { //----- unregister -----------------------------------------------------
 					int msgLength = 0;
@@ -184,8 +199,8 @@ class Send implements Runnable {
 						continue;
 					}
 					int portnum = Integer.parseInt(args[1]);
-					if (socket == null) {
-						socket = new DatagramSocket(portnum);
+					if (sendSocket == null) {
+						sendSocket = new DatagramSocket(portnum);
 					}
 					byte[] m = new byte[1000];
 					m[0] = (byte) 0xC4;
@@ -212,7 +227,7 @@ class Send implements Runnable {
 					msgLength += 2;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 					try {
-						socket.send(packet);
+						sendSocket.send(packet);
 						this.sequenceNum ++;
 					} catch (IOException e) {
 						e.printStackTrace();
@@ -222,7 +237,7 @@ class Send implements Runnable {
 				} else if (command.startsWith("f")) { //----- fetch -----------------------------------------------------
 					int msgLength = 0;
 					String[] args = command.split(" ");
-					if (args.length != 1) { // ? <name prefix> optional parameter?
+					if (args.length != 1 && args.length != 2) { // <name prefix> optional parameter
 						usage("f");
 						continue;
 					}
@@ -232,17 +247,27 @@ class Send implements Runnable {
 					m[2] = (byte) sequenceNum;
 					m[3] = (byte) 0x03; // Fetch
 					msgLength += 4;
-					int len = 0;
-					m[4] = (byte) len;
+					String namePrefix = "";
+					int namePrefixLen = 0;
+					byte[] namePrefixBytes;
+					if (args.length == 2) {
+						namePrefix = args[1];
+						namePrefixBytes = namePrefix.getBytes();
+						namePrefixLen = namePrefixBytes.length;
+						for (int i = 0; i < namePrefixLen; i ++) {
+							m[5 + i] = namePrefixBytes[i];
+						}
+					}
+					m[4] = (byte) namePrefixLen;
 					msgLength += 1;
-					msgLength += len;
+					msgLength += namePrefixLen;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
-					if (socket == null) {
+					if (sendSocket == null) {
 						System.out.println("No socket. Please register first.");
 						continue;
 					}
 					try {
-						socket.send(packet);
+						sendSocket.send(packet);
 						this.sequenceNum ++;
 					} catch (IOException e) {
 						e.printStackTrace();
@@ -255,7 +280,7 @@ class Send implements Runnable {
 						continue;
 					}
 					
-					if (socket == null) {
+					if (sendSocket == null) {
 						System.out.println("No socket. Please register first.");
 						continue;
 					}
@@ -267,7 +292,7 @@ class Send implements Runnable {
 					msgLength += 4;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 					try {
-						socket.send(packet);
+						sendSocket.send(packet);
 						this.sequenceNum ++;
 					} catch (IOException e) {
 						e.printStackTrace();
@@ -284,22 +309,58 @@ class Send implements Runnable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		} finally {
-            if (socket != null)
-                socket.close();
+            if (sendSocket != null)
+                sendSocket.close();
         }
 	}
 }
 
 
 class Listen implements Runnable {
+	private final DatagramSocket socket;
 
-
-	public Listen(int port) {
-		
+	public Listen(DatagramSocket socket) {
+		this.socket = socket;
 	}
 	
 	@Override
 	public void run() {
-
+		byte[] recvData = new byte[1024];
+        try {
+            while (true) {
+                DatagramPacket packet = new DatagramPacket(recvData, recvData.length);
+                // will wait forever until a packet is received
+                socket.receive(packet);
+                // when we get here, we have received a packet with some data
+                // print the data contained in the arriving packet
+                String data = new String(packet.getData(), 0, packet.getLength());
+                byte[] dataBytes = data.getBytes();
+                if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
+                	System.out.println("Unknown message");
+                } else {
+                	if (dataBytes[3] == (byte) 0x02) { // Registered message
+                		int seqNum = (int) dataBytes[2];
+                		long lifetime = 0;
+                		// convert the lifetime bytes to a value
+                		for (int i = 4; i <= 5; i++) {
+                			lifetime = (lifetime << 8) + (dataBytes[i] & 0xff);
+                		}
+                		System.out.println("Register " + InetAddress.getLocalHost().getHostAddress() + ":" 
+                				+ socket.getLocalPort() + " successful: lifetime = " + lifetime);
+                	} else if (dataBytes[3] == (byte) 0x04) { // FetchResponse
+                		System.out.println("FetchResponse, change this message");
+                	} else if (dataBytes[3] == (byte) 0x07) { // ACK
+                		System.out.println("Success");
+                	}
+                }
+            }
+        } catch (SocketException e) {
+            // This exception is expected, and is how we will cleanly exit this thread
+            //System.out.println("SocketException: " + e.getMessage());
+            return;
+        } catch (IOException e) {
+            System.out.println("IOException: " + e.getMessage());
+            return;
+        }
 	}
 }
