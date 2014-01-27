@@ -39,7 +39,9 @@ public class RegistrationAgent {
 			System.out.println("Usage: java RegistrationAgent <registration service host name> <service port>");
 			System.exit(1);
 		}
-
+		// Print out ip addresses of registration server and the host machine
+		System.out.println("regServerIP = " + InetAddress.getByName(hostname).getHostAddress().toString());
+		System.out.println("thisHostIP = " + InetAddress.getLocalHost().getHostAddress().toString());
 		Send s = new Send(InetAddress.getByName(hostname), port);
 		Thread t1 = new Thread(s);
 		t1.start();
@@ -80,19 +82,79 @@ class Send implements Runnable {
 			System.out.println("	p ==> Send Probe to registration service");
 		}
 	}
+	
+	private void waitForResponse(DatagramSocket socket, int expectedSeqNum) {
+		byte[] recvData = new byte[1024];
+		DatagramPacket packet = new DatagramPacket(recvData, recvData.length);
+        // will wait forever until a packet is received
+        try {
+			socket.receive(packet);
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+        // when we get here, we have received a packet with some data
+        // print the data contained in the arriving packet
+        String data = new String(packet.getData(), 0, packet.getLength());
+        byte[] dataBytes = data.getBytes();
+        if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
+        	System.out.println("Unknown message: Magic Number mismatch.");
+        } else {
+        	int seqNum = (int) dataBytes[2];
+    		if (expectedSeqNum != seqNum) { // Do nothing if 
+    			return;
+    		}
+        	if (dataBytes[3] == (byte) 0x02) { // Registered message
+        		long lifetime = 0;
+        		// convert the lifetime bytes to a value
+        		for (int i = 4; i <= 5; i++) {
+        			lifetime = (lifetime << 8) + (dataBytes[i] & 0xff);
+        		}
+        		try {
+        			System.out.println("Register " + InetAddress.getLocalHost().getHostAddress() + ":" 
+            				+ socket.getLocalPort() + " successful: lifetime = " + lifetime);
+				} catch (UnknownHostException e) {
+					e.printStackTrace();
+				}
+        	} else if (dataBytes[3] == (byte) 0x04) { // FetchResponse
+        		System.out.println("FetchResponse, change this message");
+        	} else if (dataBytes[3] == (byte) 0x07) { // ACK
+        		System.out.println("Success");
+        	}
+        }
+	}
 
 	@Override
 	public void run() {
 		// Here, we will accept commands from stdin that cause it to send messages to the registration service
 		// identified by the command line arguments, to read its responses the service sends, and to print
 		// appropriate messages about the result of the interaction.
+		DatagramSocket sendSocket = null;
+		DatagramSocket listenSocket = null;
+		// try to find two consecutive ports
+		while (sendSocket == null && listenSocket == null) {
+			try {
+				sendSocket = new DatagramSocket(); // will find available port
+			} catch (SocketException e) { // also catches BindException in case port is being used
+				sendSocket = null;
+				continue;
+			}
+			int portnum = sendSocket.getLocalPort();
+			try {
+				listenSocket = new DatagramSocket(portnum + 1);
+			} catch (SocketException e) { // also catches BindException in case port is being used
+				sendSocket.close();
+				sendSocket = null;
+				listenSocket = null;
+			}
+		}
+		
 		String prompt = "Enter r(egister), u(nregister), f(etch), p(robe), or q(uit):";
 		System.out.println(prompt);
 		// This reader will read a line of input at a time from stdin and send it to the client
 		BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
 		String command = "";
-		DatagramSocket sendSocket = null;
-		DatagramSocket listenSocket = null;
+		
 		try {
 			while(!(command = input.readLine()).equals("q")) { // quit if the user types "q"
 				// Determine which command it is and execute accordingly
@@ -113,10 +175,9 @@ class Send implements Runnable {
 
 				// Command: p
 				// Send a Probe to the registration service and display an indication of whether or not it succeeded.
-
+				DatagramSocket serviceSocket = null;
 				if (command.startsWith("r")) { //----- register -----------------------------------------------------
-/////////////////////////////////////// TODO: handle addr already in use exception==> java.net.BindException
-/////////////////////////////////////// TODO: send exactly message size: no trailing 0's
+/////////////////////////////////////// TODO: send no more than max packet size
 /////////////////////////////////////// TODO:if a packet is re-sent, all copies carry the originally assigned sequence number
 /////////////////////////////////////// TODO:the sequence numbers (eventually) wrap.
 					int msgLength = 0;
@@ -126,12 +187,11 @@ class Send implements Runnable {
 						continue;
 					}
 					int portnum = Integer.parseInt(args[1]);
-					if (sendSocket == null) {
+					if (serviceSocket == null) {
 						try {
-							sendSocket = new DatagramSocket(portnum);
-							listenSocket = new DatagramSocket(portnum + 1);
+							serviceSocket = new DatagramSocket(portnum);
 						} catch (BindException e) {
-							System.out.println("Can't reserve two consecutive ports. Please try another port.");
+							System.out.println("Can't reserve this port. Please try another port.");
 							continue;
 						}
 					}
@@ -157,8 +217,8 @@ class Send implements Runnable {
 						e.printStackTrace();
 						System.exit(1);
 					}
-					m[8] = (byte) (portnum & 0xFF); // Service port number
-					m[9] = (byte) ((portnum >> 8) & 0xFF);
+					m[8] = (byte) ((portnum >> 8) & 0xFF); // Service port number, will be in big endian order this way
+					m[9] = (byte) (portnum & 0xFF);
 					msgLength += 2;
 					byte[] dataBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
 							.putLong(Long.parseLong(serviceData)).array();
@@ -177,20 +237,19 @@ class Send implements Runnable {
 					msgLength += len;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 					
-					// Create a thread that will listen for responses; the port will be the same port we send
-					Listen l = new Listen(sendSocket);
-					Thread t2 = new Thread(l);
-					t2.start();
+					// Create a thread that will listen server's probes
+					Listen probeListen = new Listen(listenSocket);
+					Thread probeThread = new Thread(probeListen);
+					probeThread.start();
 					try {
 						sendSocket.send(packet);
-						this.sequenceNum ++;
 						// Listen for server response; expecting an Registered message with lifetime of connection
+						// Wait for response, verify sequence number
+						waitForResponse(sendSocket, sequenceNum);
+						this.sequenceNum ++;
 					} catch (IOException e) {
 						e.printStackTrace();
 					}
-
-					
-
 				} else if (command.startsWith("u")) { //----- unregister -----------------------------------------------------
 					int msgLength = 0;
 					String[] args = command.split(" ");
@@ -222,12 +281,14 @@ class Send implements Runnable {
 						e.printStackTrace();
 						System.exit(1);
 					}
-					m[8] = (byte) (portnum & 0xFF); // Service port number
-					m[9] = (byte) ((portnum >> 8) & 0xFF);
+					m[8] = (byte) ((portnum >> 8) & 0xFF); // Service port number, will be in big endian order this way 
+					m[9] = (byte) (portnum & 0xFF);
 					msgLength += 2;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 					try {
 						sendSocket.send(packet);
+						// Wait for response, verify sequence number
+						waitForResponse(sendSocket, sequenceNum);
 						this.sequenceNum ++;
 					} catch (IOException e) {
 						e.printStackTrace();
@@ -268,6 +329,8 @@ class Send implements Runnable {
 					}
 					try {
 						sendSocket.send(packet);
+						// Wait for response, verify sequence number
+						waitForResponse(sendSocket, sequenceNum);
 						this.sequenceNum ++;
 					} catch (IOException e) {
 						e.printStackTrace();
@@ -293,6 +356,8 @@ class Send implements Runnable {
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 					try {
 						sendSocket.send(packet);
+						// Wait for response, verify sequence number
+						waitForResponse(sendSocket, sequenceNum);
 						this.sequenceNum ++;
 					} catch (IOException e) {
 						e.printStackTrace();
@@ -311,6 +376,8 @@ class Send implements Runnable {
 		} finally {
             if (sendSocket != null)
                 sendSocket.close();
+            if (listenSocket != null)
+                listenSocket.close();
         }
 	}
 }
@@ -336,21 +403,26 @@ class Listen implements Runnable {
                 String data = new String(packet.getData(), 0, packet.getLength());
                 byte[] dataBytes = data.getBytes();
                 if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
-                	System.out.println("Unknown message");
+                	System.out.println("Unknown message: Magic Number mismatch.");
                 } else {
-                	if (dataBytes[3] == (byte) 0x02) { // Registered message
+                	if (dataBytes[3] == (byte) 0x06) { // Probe
                 		int seqNum = (int) dataBytes[2];
-                		long lifetime = 0;
-                		// convert the lifetime bytes to a value
-                		for (int i = 4; i <= 5; i++) {
-                			lifetime = (lifetime << 8) + (dataBytes[i] & 0xff);
-                		}
-                		System.out.println("Register " + InetAddress.getLocalHost().getHostAddress() + ":" 
-                				+ socket.getLocalPort() + " successful: lifetime = " + lifetime);
-                	} else if (dataBytes[3] == (byte) 0x04) { // FetchResponse
-                		System.out.println("FetchResponse, change this message");
-                	} else if (dataBytes[3] == (byte) 0x07) { // ACK
-                		System.out.println("Success");
+                		int msgLength = 0;
+    					byte[] m = new byte[1000];
+    					m[0] = (byte) 0xC4;
+    					m[1] = (byte) 0x61;
+    					m[2] = (byte) seqNum;
+    					m[3] = (byte) 0x07; // ACK
+    					msgLength += 4;
+    					InetAddress destAddr = packet.getAddress();
+    					int destPort = packet.getPort();
+    					DatagramPacket ack = new DatagramPacket(m, msgLength, destAddr, destPort);
+    					try {
+    						socket.send(ack);
+    					} catch (IOException e) {
+    						e.printStackTrace();
+    					}
+                		System.out.println("I've been probed!");
                 	}
                 }
             }
