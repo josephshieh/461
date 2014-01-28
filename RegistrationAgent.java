@@ -11,8 +11,6 @@
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.net.BindException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -21,7 +19,9 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Timer;
 
 public class RegistrationAgent {
 	public static void main(String args[]) throws Exception {
@@ -85,15 +85,126 @@ class Send implements Runnable {
 			System.out.println("	p ==> Send Probe to registration service");
 		}
 	}
-	
+
+	class Reregister implements Runnable {
+		private final int fraction = 8;
+		//volatile boolean alive;
+		Timer timer;
+		int seconds;
+		int portnum;
+		String serviceData;
+		String serviceName;
+		DatagramSocket socket;
+
+		public Reregister(int seconds, int portnum, String serviceData, String serviceName, DatagramSocket socket) {
+			//this.alive = true;
+			this.seconds = seconds / fraction;
+			this.portnum = portnum;
+			this.serviceData = serviceData;
+			this.serviceName = serviceName;
+			this.socket = socket;
+		}
+
+		/*public synchronized void kill() {
+			this.alive = false;
+		}*/
+
+		@Override
+		public void run() {
+			while (true) {
+				try {
+					Thread.sleep(seconds * 1000);
+				} catch (InterruptedException e) {
+					break;
+				}
+				DatagramPacket packet = registerService(portnum, serviceData, serviceName);
+				seconds = tryRegister(socket, packet, 3, false) / fraction;
+			}
+		}
+	}
+
+	private long getLifetime(DatagramSocket socket, int expectedSeqNum, boolean printAll) {
+		long lifetime = 0;
+		byte[] recvData = new byte[1024];
+		DatagramPacket packet = new DatagramPacket(recvData, recvData.length);
+		// will wait forever until a packet is received, or until timeout occurs
+		try {
+			socket.receive(packet);
+		} catch (SocketTimeoutException e) {
+			return lifetime;
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		// when we get here, we have received a packet with some data
+		// print the data contained in the arriving packet
+		String data = new String(packet.getData(), 0, packet.getLength());
+		byte[] dataBytes = data.getBytes();
+		if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
+			System.out.println("Unknown message: Magic Number mismatch.");
+		} else {
+			int seqNum = dataBytes[2];
+			if (expectedSeqNum != seqNum) { // Do nothing if
+				return lifetime;
+			}
+			if (dataBytes[3] == (byte) 0x02) { // Registered message
+				// convert the lifetime bytes to a value
+				for (int i = 4; i <= 5; i++) {
+					lifetime = (lifetime << 8) + (dataBytes[i] & 0xff);
+				}
+				try {
+					if (printAll) {
+						System.out.println("Register " + InetAddress.getLocalHost().getHostAddress() + ":"
+								+ socket.getLocalPort() + " successful: lifetime = " + lifetime);
+					}
+				} catch (UnknownHostException e) {
+					e.printStackTrace();
+				}
+			} else {
+				System.out.println("Incorrect type of message received.");
+			}
+		}
+		return lifetime;
+	}
+
+	private int tryRegister(DatagramSocket socket, DatagramPacket packet, int numTries, boolean printAll) {
+		int lifetime = 0;
+		try {
+			int sendTry = 0;
+			while (sendTry < numTries) {
+				socket.send(packet);
+				// Listen for server response; expecting an Registered message with lifetime of connection
+				// Wait for response, verify sequence number
+				lifetime = (int) getLifetime(socket, sequenceNum, printAll);
+				sendTry++;
+				if (lifetime > 0) {
+					return lifetime;
+				} else {
+					System.out.println("Timed out waiting for reply to REGISTER message.");
+				}
+			}
+			if (sendTry == numTries) {
+				System.out.println("REGISTER FAILED: Sent " + sendTry + " REGISTER messages but got no reply.");
+			} else {
+				if (this.sequenceNum == 255) {
+					this.sequenceNum = 0;
+				} else {
+					this.sequenceNum ++;
+				}
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return lifetime;
+	}
 	// This method will wait for a response along the given socket (DatagramSocket), verify that the message data
-	// starts with the magic number 0xC461 and that the message's enclosed sequence number matches the given 
+	// starts with the magic number 0xC461 and that the message's enclosed sequence number matches the given
 	// expectedSeqNum (int). Upon success, it will print a corresponding message and return true so that the caller
 	// knows whether to send the message again or not.
 	private boolean waitForResponse(DatagramSocket socket, int expectedSeqNum) {
 		byte[] recvData = new byte[1024];
 		DatagramPacket packet = new DatagramPacket(recvData, recvData.length);
-        // will wait forever until a packet is received, or until timeout occurs
+		// will wait forever until a packet is received, or until timeout occurs
 		try {
 			socket.receive(packet);
 		} catch (SocketTimeoutException e) {
@@ -101,51 +212,59 @@ class Send implements Runnable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-        // when we get here, we have received a packet with some data
-        // print the data contained in the arriving packet
-        String data = new String(packet.getData(), 0, packet.getLength());
-        byte[] dataBytes = data.getBytes();
-        if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
-        	System.out.println("Unknown message: Magic Number mismatch.");
-        } else {
-        	int seqNum = (int) dataBytes[2];
-    		if (expectedSeqNum != seqNum) { // Do nothing if 
-    			return false;
-    		}
-        	if (dataBytes[3] == (byte) 0x02) { // Registered message
-        		long lifetime = 0;
-        		// convert the lifetime bytes to a value
-        		for (int i = 4; i <= 5; i++) {
-        			lifetime = (lifetime << 8) + (dataBytes[i] & 0xff);
-        		}
-        		try {
-        			System.out.println("Register " + InetAddress.getLocalHost().getHostAddress() + ":" 
-            				+ socket.getLocalPort() + " successful: lifetime = " + lifetime);
+		// when we get here, we have received a packet with some data
+		// print the data contained in the arriving packet
+		String data = new String(packet.getData(), 0, packet.getLength());
+		byte[] dataBytes = data.getBytes();
+		if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
+			System.out.println("Unknown message: Magic Number mismatch.");
+		} else {
+			int seqNum = dataBytes[2];
+			if (expectedSeqNum != seqNum) { // Do nothing if
+				return false;
+			}
+			if (dataBytes[3] == (byte) 0x02) { // Registered message
+				long lifetime = 0;
+				// convert the lifetime bytes to a value
+				for (int i = 4; i <= 5; i++) {
+					lifetime = (lifetime << 8) + (dataBytes[i] & 0xff);
+				}
+				try {
+					System.out.println("Register " + InetAddress.getLocalHost().getHostAddress() + ":"
+							+ socket.getLocalPort() + " successful: lifetime = " + lifetime);
 				} catch (UnknownHostException e) {
 					e.printStackTrace();
 				}
-        	} else if (dataBytes[3] == (byte) 0x04) { // FetchResponse
-        		int numEntries = (int) dataBytes[4];
-        		for (int i = 0; i < numEntries; i++) {
-        			long[] ipNums = new long[4];
-        			for (int j = 0; j < 4; j++) {
-        				ipNums[j] = (dataBytes[5 + i * 10 + j] & 0xff);
-        			}
-        			System.out.println("[" + (i + 1) + "]  " + ipNums[0] + "." + ipNums[1] + "." + ipNums[2] + "." +ipNums[3]);
-        		}
-        		
-        		//System.out.println("FetchResponse, change this message");
-        	} else if (dataBytes[3] == (byte) 0x07) { // ACK
-        		System.out.println("Success");
-        	}
-        }
-        return true;
+			} else if (dataBytes[3] == (byte) 0x04) { // FetchResponse
+				int numEntries = dataBytes[4];
+				for (int i = 0; i < numEntries; i++) {
+					long[] ipNums = new long[4];
+					for (int j = 0; j < 4; j++) {
+						ipNums[j] = (dataBytes[5 + i * 10 + j] & 0xff);
+					}
+					long portnum = 0;
+					for (int j = 4; j < 6; j++) {
+						portnum = (portnum << 8) + (dataBytes[5 + i * 10 + j] & 0xff);
+					}
+					long serviceData = 0;
+					for (int j = 6; j < 10; j++) {
+						serviceData = (serviceData << 8) + (dataBytes[5 + i * 10 + j] & 0xff);
+					}
+					System.out.println("[" + (i + 1) + "]  " + ipNums[0] + "." + ipNums[1] + "." + ipNums[2] + "." +ipNums[3] +
+							"  " + portnum + "  " + serviceData + " (0x" + Long.toHexString(serviceData) + ")");
+
+				}
+			} else if (dataBytes[3] == (byte) 0x07) { // ACK
+				System.out.println("Success");
+			}
+		}
+		return true;
 	}
-	
+
 	// This method will attempt to send the given packet (DatagramPacket) from given socket (DatagramSocket) numTries (Int) times
-	// and will print custom error messages specific to the type of message being sent, specified by msgType (String). It 
+	// and will print custom error messages specific to the type of message being sent, specified by msgType (String). It
 	// will also increment the global message sequence number upon success.
-	private void trySend(DatagramSocket socket, DatagramPacket packet, int numTries, String msgType) {
+	private void trySend(DatagramSocket socket, DatagramPacket packet, int numTries, String msgType, boolean printAll) {
 		try {
 			int sendTry = 0;
 			while (sendTry < numTries) {
@@ -157,7 +276,9 @@ class Send implements Runnable {
 				if (success) {
 					break;
 				} else {
-					System.out.println("Timed out waiting for reply to " + msgType + " message.");
+					if (printAll) {
+						System.out.println("Timed out waiting for reply to " + msgType + " message.");
+					}
 				}
 			}
 			if (sendTry == numTries) {
@@ -173,6 +294,53 @@ class Send implements Runnable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+	}
+
+	private DatagramPacket registerService(int portnum, String serviceData, String serviceName) {
+		int msgLength = 0;
+		byte[] m = new byte[1000];
+		m[0] = (byte) 0xC4;
+		m[1] = (byte) 0x61;
+		m[2] = (byte) sequenceNum;
+		m[3] = (byte) 0x01; // Register
+		msgLength += 4;
+		String ip;
+		try {
+			ip = InetAddress.getLocalHost().getHostAddress();
+			String[] nums = ip.split("\\.");
+			int[] intNums = new int[4];
+			for (int i = 0; i < 4; i++) {
+				int j = Integer.parseInt(nums[i]);
+				intNums[i] = j;
+			}
+			m[4] = (byte) intNums[0]; // Service ip
+			m[5] = (byte) intNums[1];
+			m[6] = (byte) intNums[2];
+			m[7] = (byte) intNums[3];
+			msgLength += 4;
+		} catch (UnknownHostException e) {
+			e.printStackTrace();
+			System.exit(1);
+		}
+		m[8] = (byte) ((portnum >> 8) & 0xFF); // Service port number, will be in big endian order this way
+		m[9] = (byte) (portnum & 0xFF);
+		msgLength += 2;
+		byte[] dataBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
+				.putLong(Long.parseLong(serviceData)).array();
+		m[10] = dataBytes[4]; // Service data
+		m[11] = dataBytes[5];
+		m[12] = dataBytes[6];
+		m[13] = dataBytes[7];
+		msgLength += 4;
+		int len = serviceName.getBytes().length;
+		m[14] = (byte) len;
+		msgLength += 1;
+		byte[] serviceNameBytes = serviceName.getBytes();
+		for (int i = 0; i < len; i ++) {
+			m[15 + i] = serviceNameBytes[i];
+		}
+		msgLength += len;
+		return new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 	}
 
 	@Override
@@ -203,15 +371,19 @@ class Send implements Runnable {
 			sendSocket.setSoTimeout(5000); // == 5 seconds
 		} catch (SocketException e1) {
 			e1.printStackTrace();
-		}   
+		}
 		String prompt = "Enter r(egister), u(nregister), f(etch), p(robe), or q(uit):";
 		System.out.println(prompt);
 		// This reader will read a line of input at a time from stdin and send it to the client
 		BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
 		String command = "";
-		
+		Map<Integer, Reregister> reregs = new HashMap<Integer, Reregister>();
+		Map<Integer, Thread> reregThreads = new HashMap<Integer, Thread>();
 		try {
 			Listen probeListen = null;
+			// This map will allow us to link every service that is registered to a Thread
+			// the periodically reregisters that service. This will allow use to kill end that thread
+			// once that service is unregistered.
 			while(!(command = input.readLine()).equals("q")) { // quit if the user types "q"
 				// Determine which command it is and execute accordingly
 
@@ -231,81 +403,46 @@ class Send implements Runnable {
 
 				// Command: p
 				// Send a Probe to the registration service and display an indication of whether or not it succeeded.
-				DatagramSocket serviceSocket = null;
-				
+
 				if (command.startsWith("r")) { //----- register -----------------------------------------------------
-/////////////////////////////////////// TODO: send no more than max packet size
-/////////////////////////////////////// TODO: do we need to make new socket for service registration?
-					int msgLength = 0;
+					/////////////////////////////////////// TODO: send no more than max packet size
 					String[] args = command.split(" ");
 					if (args.length != 4) {
 						usage("r");
 						continue;
 					}
 					int portnum = Integer.parseInt(args[1]);
-					/*if (serviceSocket == null) {
-						try {
-							serviceSocket = new DatagramSocket(portnum);
-						} catch (BindException e) {
-							System.out.println("Can't reserve this port. Please try another port.");
-							continue;
-						}
-					}*/
 					String serviceData = args[2];
 					String serviceName = args[3];
-					byte[] m = new byte[1000];
-					m[0] = (byte) 0xC4;
-					m[1] = (byte) 0x61;
-					m[2] = (byte) sequenceNum;
-					m[3] = (byte) 0x01; // Register
-					msgLength += 4;
-					String ip;
-					try {
-						ip = InetAddress.getLocalHost().getHostAddress();
-						String[] nums = ip.split("\\.");
-						int[] intNums = new int[4];
-						for (int i = 0; i < 4; i++) {
-							int j = Integer.parseInt(nums[i]);
-							intNums[i] = j;
+					// If there is a thread running on this port, it must be reregistering, so we want to stop it
+					if (reregThreads.containsKey(portnum)){
+						reregThreads.get(portnum).interrupt();
+					}
+					DatagramPacket packet = registerService(portnum, serviceData, serviceName);
+
+					// Start periodic reregistration
+					int lifetime = tryRegister(sendSocket, packet, 3, true);
+					if (lifetime > 0) {
+						Reregister rereg = new Reregister(lifetime, portnum, serviceData, serviceName, sendSocket);
+						Thread reregisterThread = new Thread(rereg);
+						reregisterThread.start();
+						if (reregThreads.containsKey(portnum)) {
+							reregThreads.get(portnum).interrupt();
 						}
-						m[4] = (byte) intNums[0]; // Service ip
-						m[5] = (byte) intNums[1];
-						m[6] = (byte) intNums[2];
-						m[7] = (byte) intNums[3];
-						msgLength += 4;
-					} catch (UnknownHostException e) {
-						e.printStackTrace();
-						System.exit(1);
+						reregThreads.put(portnum, reregisterThread);
+						/*if (reregs.containsKey(portnum)) {
+							reregs.get(portnum).kill();
+						}*/
+						//reregs.put(portnum, rereg);
 					}
-					m[8] = (byte) ((portnum >> 8) & 0xFF); // Service port number, will be in big endian order this way
-					m[9] = (byte) (portnum & 0xFF);
-					msgLength += 2;
-					byte[] dataBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
-							.putLong(Long.parseLong(serviceData)).array();
-					m[10] = dataBytes[4]; // Service data
-					m[11] = dataBytes[5];
-					m[12] = dataBytes[6];
-					m[13] = dataBytes[7];
-					msgLength += 4;
-					int len = serviceName.getBytes().length;
-					m[14] = (byte) len;
-					msgLength += 1;
-					byte[] serviceNameBytes = serviceName.getBytes();
-					for (int i = 0; i < len; i ++) {
-						m[15 + i] = serviceNameBytes[i];
-					}
-					msgLength += len;
-					
+
 					// Create a thread that will listen server's probes
 					if (probeListen == null) {
 						probeListen = new Listen(listenSocket);
 						Thread probeThread = new Thread(probeListen);
 						probeThread.start();
 					}
-					
-					
-					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
-					trySend(sendSocket, packet, 3, "REGISTER");
+
 				} else if (command.startsWith("u")) { //----- unregister -----------------------------------------------------
 					int msgLength = 0;
 					String[] args = command.split(" ");
@@ -314,7 +451,7 @@ class Send implements Runnable {
 						continue;
 					}
 					int portnum = Integer.parseInt(args[1]);
-					
+
 					byte[] m = new byte[1000];
 					m[0] = (byte) 0xC4;
 					m[1] = (byte) 0x61;
@@ -339,11 +476,21 @@ class Send implements Runnable {
 						e.printStackTrace();
 						System.exit(1);
 					}
-					m[8] = (byte) ((portnum >> 8) & 0xFF); // Service port number, will be in big endian order this way 
+					m[8] = (byte) ((portnum >> 8) & 0xFF); // Service port number, will be in big endian order this way
 					m[9] = (byte) (portnum & 0xFF);
 					msgLength += 2;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
-					trySend(sendSocket, packet, 3, "UNREGISTER");
+					trySend(sendSocket, packet, 3, "UNREGISTER", true);
+
+					if (reregThreads.containsKey(portnum)) {
+						/*Reregister rereg = reregs.get(portnum);
+						if (rereg != null) {
+							rereg.kill(); // this will stop periodic reregistration
+						}*/
+						//reregs.remove(portnum);
+						reregThreads.get(portnum).interrupt();
+						reregThreads.remove(portnum);
+					}
 				} else if (command.startsWith("f")) { //----- fetch -----------------------------------------------------
 					int msgLength = 0;
 					String[] args = command.split(" ");
@@ -376,7 +523,7 @@ class Send implements Runnable {
 						System.out.println("No socket. Please register first.");
 						continue;
 					}
-					trySend(sendSocket, packet, 3, "FETCH");
+					trySend(sendSocket, packet, 3, "FETCH", true);
 				} else if (command.startsWith("p")) { //----- probe -----------------------------------------------------
 					int msgLength = 0;
 					String[] args = command.split(" ");
@@ -384,7 +531,7 @@ class Send implements Runnable {
 						usage("p");
 						continue;
 					}
-					
+
 					if (sendSocket == null) {
 						System.out.println("No socket. Please register first.");
 						continue;
@@ -396,7 +543,7 @@ class Send implements Runnable {
 					m[3] = (byte) 0x06; // Probe
 					msgLength += 4;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
-					trySend(sendSocket, packet, 3, "PROBE");
+					trySend(sendSocket, packet, 3, "PROBE", true);
 				} else {
 					usageAll();
 				}
@@ -407,11 +554,17 @@ class Send implements Runnable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		} finally {
-            if (sendSocket != null)
-                sendSocket.close();
-            if (listenSocket != null)
-                listenSocket.close();
-        }
+			for (int port: reregThreads.keySet()) {
+				Thread cur = reregThreads.get(port);
+				cur.interrupt();
+			}
+			if (sendSocket != null) {
+				sendSocket.close();
+			}
+			if (listenSocket != null) {
+				listenSocket.close();
+			}
+		}
 	}
 }
 
@@ -422,50 +575,51 @@ class Listen implements Runnable {
 	public Listen(DatagramSocket socket) {
 		this.socket = socket;
 	}
-	
+
 	@Override
 	public void run() {
 		byte[] recvData = new byte[1024];
-        try {
-            while (true) {
-            	DatagramPacket packet = new DatagramPacket(recvData, recvData.length);
-                // will wait forever until a packet is received, or timeout occurs
+		try {
+			while (true) {
+				DatagramPacket packet = new DatagramPacket(recvData, recvData.length);
+				// will wait forever until a packet is received, or timeout occurs
 				socket.receive(packet);
-                // when we get here, we have received a packet with some data
-                // print the data contained in the arriving packet
-                String data = new String(packet.getData(), 0, packet.getLength());
-                byte[] dataBytes = data.getBytes();
-                if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
-                	System.out.println("Unknown message: Magic Number mismatch.");
-                } else {
-                	if (dataBytes[3] == (byte) 0x06) { // Probe
-                		int seqNum = (int) dataBytes[2];
-                		int msgLength = 0;
-    					byte[] m = new byte[1000];
-    					m[0] = (byte) 0xC4;
-    					m[1] = (byte) 0x61;
-    					m[2] = (byte) seqNum;
-    					m[3] = (byte) 0x07; // ACK
-    					msgLength += 4;
-    					InetAddress destAddr = packet.getAddress();
-    					int destPort = packet.getPort();
-    					DatagramPacket ack = new DatagramPacket(m, msgLength, destAddr, destPort);
-    					try {
-    						socket.send(ack);
-    					} catch (IOException e) {
-    						e.printStackTrace();
-    					}
-                		System.out.println("I've been probed!");
-                	}
-                }
-            }
-        } catch (SocketException e) {
-            // This exception is expected, and is how we will cleanly exit this thread
-            //System.out.println("SocketException: " + e.getMessage());
-            return;
-        } catch (IOException e) {
-            System.out.println("IOException: " + e.getMessage());
-            return;
-        }
+				// when we get here, we have received a packet with some data
+				// print the data contained in the arriving packet
+				String data = new String(packet.getData(), 0, packet.getLength());
+				byte[] dataBytes = data.getBytes();
+				if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
+					System.out.println("Unknown message: Magic Number mismatch.");
+				} else {
+					if (dataBytes[3] == (byte) 0x06) { // Probe
+						int seqNum = dataBytes[2];
+						int msgLength = 0;
+						byte[] m = new byte[1000];
+						m[0] = (byte) 0xC4;
+						m[1] = (byte) 0x61;
+						m[2] = (byte) seqNum;
+						m[3] = (byte) 0x07; // ACK
+						msgLength += 4;
+						InetAddress destAddr = packet.getAddress();
+						int destPort = packet.getPort();
+						DatagramPacket ack = new DatagramPacket(m, msgLength, destAddr, destPort);
+						try {
+							socket.send(ack);
+						} catch (IOException e) {
+							e.printStackTrace();
+						}
+						System.out.println("I've been probed!");
+					}
+				}
+			}
+		} catch (SocketException e) {
+			//This exception is expected, and is how we will cleanly exit this thread
+			//System.out.println("SocketException: " + e.getMessage());
+			return;
+		} catch (IOException e) {
+			System.out.println("IOException: " + e.getMessage());
+			return;
+		}
 	}
 }
+
