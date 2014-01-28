@@ -52,6 +52,9 @@ public class RegistrationAgent {
 	}
 }
 
+/** This class will be capable of sending requests to a given address and port, taking in keyboard input from the user
+ *  to determine what type of messages to send to the regsitration server. It will print out feedback accordingly.
+ * */
 class Send implements Runnable {
 	private int sequenceNum;
 	private final InetAddress destAddr;
@@ -71,7 +74,6 @@ class Send implements Runnable {
 		usage("f");
 		usage("p");
 		System.out.println("	q ==> Quit execution");
-
 	}
 
 	public void usage(String cmd) {
@@ -85,10 +87,12 @@ class Send implements Runnable {
 			System.out.println("	p ==> Send Probe to registration service");
 		}
 	}
-
+	/***
+	 * This is for threads to reregister periodically
+	 */
 	class Reregister implements Runnable {
-		private final int fraction = 8;
-		//volatile boolean alive;
+		// Given a lifetime of a registration, we will periodically reregister by dividing by this factor
+		private final int fraction = 2;
 		Timer timer;
 		int seconds;
 		int portnum;
@@ -97,7 +101,6 @@ class Send implements Runnable {
 		DatagramSocket socket;
 
 		public Reregister(int seconds, int portnum, String serviceData, String serviceName, DatagramSocket socket) {
-			//this.alive = true;
 			this.seconds = seconds / fraction;
 			this.portnum = portnum;
 			this.serviceData = serviceData;
@@ -105,16 +108,14 @@ class Send implements Runnable {
 			this.socket = socket;
 		}
 
-		/*public synchronized void kill() {
-			this.alive = false;
-		}*/
-
 		@Override
 		public void run() {
 			while (true) {
 				try {
+					// Wait for seconds long to try to reregister
 					Thread.sleep(seconds * 1000);
 				} catch (InterruptedException e) {
+					// Once interrupted, we will exit the loop which ends the thread
 					break;
 				}
 				DatagramPacket packet = registerService(portnum, serviceData, serviceName);
@@ -122,7 +123,7 @@ class Send implements Runnable {
 			}
 		}
 	}
-
+	// Get life time of a registration
 	private long getLifetime(DatagramSocket socket, int expectedSeqNum, boolean printAll) {
 		long lifetime = 0;
 		byte[] recvData = new byte[1024];
@@ -167,6 +168,8 @@ class Send implements Runnable {
 		return lifetime;
 	}
 
+	// This will try to register a given port to the registration server, will return 0 if failed, positive integer
+	// representing the life time of the registration otherwise
 	private int tryRegister(DatagramSocket socket, DatagramPacket packet, int numTries, boolean printAll) {
 		int lifetime = 0;
 		try {
@@ -296,6 +299,7 @@ class Send implements Runnable {
 		}
 	}
 
+	// This will build up a datagram packet for a register request to send to the registration server
 	private DatagramPacket registerService(int portnum, String serviceData, String serviceName) {
 		int msgLength = 0;
 		byte[] m = new byte[1000];
@@ -377,7 +381,6 @@ class Send implements Runnable {
 		// This reader will read a line of input at a time from stdin and send it to the client
 		BufferedReader input = new BufferedReader(new InputStreamReader(System.in));
 		String command = "";
-		Map<Integer, Reregister> reregs = new HashMap<Integer, Reregister>();
 		Map<Integer, Thread> reregThreads = new HashMap<Integer, Thread>();
 		try {
 			Listen probeListen = null;
@@ -430,10 +433,6 @@ class Send implements Runnable {
 							reregThreads.get(portnum).interrupt();
 						}
 						reregThreads.put(portnum, reregisterThread);
-						/*if (reregs.containsKey(portnum)) {
-							reregs.get(portnum).kill();
-						}*/
-						//reregs.put(portnum, rereg);
 					}
 
 					// Create a thread that will listen server's probes
@@ -483,11 +482,6 @@ class Send implements Runnable {
 					trySend(sendSocket, packet, 3, "UNREGISTER", true);
 
 					if (reregThreads.containsKey(portnum)) {
-						/*Reregister rereg = reregs.get(portnum);
-						if (rereg != null) {
-							rereg.kill(); // this will stop periodic reregistration
-						}*/
-						//reregs.remove(portnum);
 						reregThreads.get(portnum).interrupt();
 						reregThreads.remove(portnum);
 					}
@@ -554,10 +548,12 @@ class Send implements Runnable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		} finally {
+			// Shuts down all threads
 			for (int port: reregThreads.keySet()) {
 				Thread cur = reregThreads.get(port);
 				cur.interrupt();
 			}
+			// Close both sending and listening sockets
 			if (sendSocket != null) {
 				sendSocket.close();
 			}
@@ -568,7 +564,9 @@ class Send implements Runnable {
 	}
 }
 
-
+/**
+ * This class will allow us to listen to requests from the registration server
+ */
 class Listen implements Runnable {
 	private final DatagramSocket socket;
 
