@@ -1,2 +1,0 @@
-Joseph Shieh
-Serge Naumets
