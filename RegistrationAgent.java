@@ -212,7 +212,6 @@ class Send implements Runnable {
 		}
 		// when we get here, we have received a packet with some data
 		// print the data contained in the arriving packet
-		////////////////// String data = new String(packet.getData(), 0, packet.getLength());
 		byte[] dataBytes = packet.getData();
 		if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
 			System.out.println("Unknown message: Magic Number mismatch.");
@@ -403,7 +402,6 @@ class Send implements Runnable {
 				// Send a Probe to the registration service and display an indication of whether or not it succeeded.
 
 				if (command.startsWith("r")) { //----- register -----------------------------------------------------
-					/////////////////////////////////////// TODO: send no more than max packet size
 					String[] args = command.split(" ");
 					if (args.length != 4) {
 						usage("r");
@@ -581,7 +579,6 @@ class Listen implements Runnable {
 				socket.receive(packet);
 				// when we get here, we have received a packet with some data
 				// print the data contained in the arriving packet
-				/////////////////String data = new String(packet.getData(), 0, packet.getLength());
 				byte[] dataBytes = packet.getData();
 				if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
 					System.out.println("Unknown message: Magic Number mismatch.");
