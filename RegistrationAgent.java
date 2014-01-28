@@ -385,7 +385,7 @@ class Send implements Runnable {
 			// This map will allow us to link every service that is registered to a Thread
 			// the periodically reregisters that service. This will allow use to kill end that thread
 			// once that service is unregistered.
-			while(!(command = input.readLine()).equals("q")) { // quit if the user types "q"
+			while((command = input.readLine()) != null) { // quit if the user types EOF
 				// Determine which command it is and execute accordingly
 
 				// Command: r portnum data serviceName
@@ -536,6 +536,8 @@ class Send implements Runnable {
 					msgLength += 4;
 					DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 					trySend(sendSocket, packet, 3, "PROBE", true);
+				} else if (command.startsWith("q")) { // quit if user types "q"
+					break;
 				} else {
 					usageAll();
 				}
