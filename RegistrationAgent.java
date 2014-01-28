@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Timer;
 
 public class RegistrationAgent {
 	public static void main(String args[]) throws Exception {
@@ -93,7 +92,6 @@ class Send implements Runnable {
 	class Reregister implements Runnable {
 		// Given a lifetime of a registration, we will periodically reregister by dividing by this factor
 		private final int fraction = 2;
-		Timer timer;
 		int seconds;
 		int portnum;
 		String serviceData;
