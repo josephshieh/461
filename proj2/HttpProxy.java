@@ -2,8 +2,12 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 
 /**
  * Joseph Shieh, 1031718, josephs2@uw.edu
@@ -70,33 +74,100 @@ class Listen implements Runnable {
 			PrintWriter outputStream = new PrintWriter(socket.getOutputStream(), true);
 			BufferedReader inputStream = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 			String inputLine, outputLine = "";
-			String temp, host, connection;
+			boolean first = true;
+			String temp, hostAddr = "";
+			int port = 80;
 			while ((inputLine = inputStream.readLine()) != null) {
+				if (first){
+					// Print the first line of the request
+					System.out.println(inputLine);
+					first = false;
+				}
 				// TODO: Look for CR-LF to terminate loop
 				System.out.println(inputLine);
 				temp = inputLine.toLowerCase();
 				if (temp.startsWith("host:")) {
-					host = inputLine.split(": ")[1];
+					String host = inputLine.split(": ")[1];
+					String[] hostString = host.split(":");
+					if (hostString.length == 2) {
+						port = Integer.parseInt(hostString[1]);
+					}
+					hostAddr = hostString[0];
 					outputLine += inputLine;
+
 					//System.out.println("young fuck: " + host);
 				} else if (temp.startsWith("connection:")) {
-					connection = inputLine;
+					String connection = inputLine;
 					outputLine += "Connection: close";
 					//System.out.println("young con: " + temp);
+				} else if (temp.equals("")) {
+					System.out.println("Last Line!");
+					outputLine += inputLine;
+					SendAndReceive s = new SendAndReceive(outputLine, hostAddr, port);
+					Thread t1 = new Thread(s);
+					t1.start();
 				} else { // not host or connection
 					outputLine += inputLine;
 				}
 				outputLine += (char) 13 + ""; // CR string
 				outputLine += (char) 10 + ""; // LF string
-
-				System.out.println("Output so far:");
-				System.out.println(outputLine);
+				//System.out.println("Output so far:");
+				//System.out.println(outputLine);
 				// break;
 				// manually close connection or wait for timeout
 			}
+
 		} catch (IOException e) {
 
 		}
+	}
+
+}
+
+class SendAndReceive implements Runnable {
+	DatagramSocket sendAndReceive;
+	String outputLine;
+	String hostAddr;
+	int port;
+
+	public SendAndReceive(String outputLine, String hostAddr, int port)  {
+		try {
+			sendAndReceive = new DatagramSocket();
+		} catch (SocketException e) {
+			System.out.println("Failed to create send and receive socket");
+			System.exit(1);
+		}
+		this.outputLine = outputLine;
+		this.hostAddr = hostAddr;
+		this.port = port;
+	}
+
+	@Override
+	public void run() {
+
+		try {
+			// Redirect the packet to the web server
+			System.out.println("Sending to ... hostaddr: " + hostAddr);
+			System.out.println(outputLine);
+			System.out.println("End of request");
+			InetAddress destAddr = InetAddress.getByName(hostAddr);
+			DatagramPacket packet = new DatagramPacket(outputLine.getBytes(), outputLine.getBytes().length, destAddr, port);
+			System.out.println("a");
+			sendAndReceive.send(packet);
+			System.out.println("b");
+			// Receive response from the web server
+			byte[] buffer = new byte[1000];
+			DatagramPacket response = new DatagramPacket(buffer, buffer.length);
+			sendAndReceive.receive(response);
+			System.out.println("c");
+			String responseString = new String(response.getData());
+			System.out.println("Response string: " + responseString);
+			//outputStream.print();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+
 	}
 
 }
