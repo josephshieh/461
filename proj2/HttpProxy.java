@@ -10,7 +10,7 @@ import java.net.Socket;
 
 /**
  * Joseph Shieh, 1031718, josephs2@uw.edu
- * Sergey Naumets, ,
+ * Sergey Naumets, 1025573, snaumets@uw.edu
  * CSE 461 Networks Project 2, Create an HTTP proxy that handles requests from the client and redirects it to the server.
  */
 public class HttpProxy {
@@ -58,9 +58,13 @@ public class HttpProxy {
 	}
 }
 
+/**
+ * This is for listening to a specific client's request, and create a new thread to redirect the request
+ * to the web server.
+ */
 class Listen implements Runnable {
 	Socket socket;
-
+	public static final String EOF = "\r\n"; // CR LF String
 	public Listen(Socket client) {
 		this.socket = client;
 	}
@@ -74,36 +78,35 @@ class Listen implements Runnable {
 			boolean first = true;
 			String temp, hostAddr = "";
 			int port = 80;
-			String eof = "\r\n"; // CR LF String
 			while ((inputLine = inputStream.readLine()) != null) {
 				if (first){
 					// Print the first line of the request
 					System.out.println(inputLine);
 					first = false;
 				}
-				//System.out.println(inputLine);
 				temp = inputLine.toLowerCase();
 				if (temp.startsWith("host:")) {
+					// Get the host address
 					String host = inputLine.split(": ")[1];
+					// If the host address has a port, it will be in the form of hostAddr:port
 					String[] hostString = host.split(":");
 					if (hostString.length == 2) {
 						port = Integer.parseInt(hostString[1]);
 					}
 					hostAddr = hostString[0];
-					outputLine += inputLine + eof;
+					outputLine += inputLine + EOF;
 				} else if (temp.startsWith("connection:")) {
-					outputLine += "Connection: close" + eof;
+					// Make connection close instead of keep-alive
+					outputLine += "Connection: close" + EOF;
 				} else if (temp.equals("")) {
-					//System.out.println("Last Line!");
-					outputLine += eof;
-					//System.out.println(hostAddr);
-					//System.out.println(port);
+					// End of request's HTTP header
+					outputLine += EOF;
 					InetAddress destAddr = InetAddress.getByName(hostAddr);
 					SendAndReceive s = new SendAndReceive(destAddr, port, outputLine, outputStream);
 					Thread t = new Thread(s);
 					t.start();
 				} else { // not host or connection
-					outputLine += inputLine + eof;
+					outputLine += inputLine + EOF;
 				}
 				// manually close connection or wait for timeout
 			}
@@ -115,6 +118,9 @@ class Listen implements Runnable {
 
 }
 
+/**
+ * This is for redirecting requests to the web server and receiving responses back.
+ */
 class SendAndReceive implements Runnable {
 	Socket sendAndReceive;
 	String outputLine;
@@ -134,7 +140,6 @@ class SendAndReceive implements Runnable {
 	public void run() {
 		try {
 			// Redirect the packet to the web server
-			//System.out.println(outputLine);
 			InputStream inputStream = sendAndReceive.getInputStream();
 			PrintWriter outputStream = new PrintWriter(sendAndReceive.getOutputStream(), true);
 			// Write to web server as string
@@ -142,14 +147,28 @@ class SendAndReceive implements Runnable {
 			outputStream.flush();
 			// Read response as bytes
 			byte[] buffer = new byte[1000];
+			//byte[] bufferFinal = new byte[1000];
 			int len;
 			while((len = inputStream.read(buffer)) > 0) {
+				/*String temp = new String(buffer);
+				boolean changed = false;
+				if (temp.contains("Connection: keep-alive")) {
+					System.out.println("HAHAHA");
+					temp.replaceAll("Connection: keep-alive", "Connection: close");
+					changed = true;
+				}
+				bufferFinal = temp.getBytes();
+				if (changed) {
+					this.clientOutputStream.write(bufferFinal, 0, len-5);
+				} else {
+					this.clientOutputStream.write(bufferFinal, 0, len);
+				}*/
 				// Write to client as bytes as well
 				this.clientOutputStream.write(buffer, 0, len);
 			}
 			this.clientOutputStream.flush();
 		} catch (IOException e) {
-			e.printStackTrace();
+			//e.printStackTrace();
 		}
 	}
 
