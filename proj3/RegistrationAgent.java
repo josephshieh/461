@@ -17,7 +17,9 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class RegistrationAgent {
@@ -89,7 +91,7 @@ public class RegistrationAgent {
 		}
 	}
 
-	public void fetch(String prefix){
+	public List<Tor61NodeInfo> fetch(String prefix){
 		int msgLength = 0;
 		byte[] m = new byte[1000];
 		m[0] = (byte) 0xC4;
@@ -114,11 +116,46 @@ public class RegistrationAgent {
 		DatagramPacket packet = new DatagramPacket(m, msgLength, this.destAddr, this.destPort);
 		if (sendSocket == null) {
 			System.out.println("No socket. Please register first.");
-			return;
+			return null;
 		}
-		trySend(sendSocket, packet, 3, "FETCH", true);
+		List<Tor61NodeInfo> routerInfos = tryFetch(sendSocket, packet, 3, true);
+		return routerInfos;
 	}
 
+	private List<Tor61NodeInfo> tryFetch(DatagramSocket socket, DatagramPacket packet, int numTries, boolean printAll) {
+		try {
+			int sendTry = 0;
+			List<Tor61NodeInfo> success = null;
+			while (sendTry < numTries) {
+				socket.send(packet);
+				// Listen for server response; expecting an Registered message with lifetime of connection
+				// Wait for response, verify sequence number
+				success = waitForFetchResponse(socket, sequenceNum);
+				sendTry++;
+				if (success != null) {
+					break;
+				} else {
+					if (printAll) {
+						System.out.println("Timed out waiting for reply to fetch message.");
+					}
+				}
+			}
+			if (sendTry == numTries) {
+				System.out.println("Sent " + sendTry + " fetch messages but got no reply.");
+				System.out.println("Fetch failed.");
+			} else {
+				if (this.sequenceNum == 255) {
+					this.sequenceNum = 0;
+				} else {
+					this.sequenceNum ++;
+				}
+			}
+			return success;
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
 	public void unregister(int portnum) {
 		int msgLength = 0;
 		byte[] m = new byte[1000];
@@ -187,6 +224,7 @@ public class RegistrationAgent {
 			listenSocket.close();
 		}
 	}
+
 	// This will build up a datagram packet for a register request to send to the registration server
 	private DatagramPacket registerService(int portnum, String serviceData, String serviceName) {
 		int msgLength = 0;
@@ -499,6 +537,66 @@ public class RegistrationAgent {
 			}
 		}
 		return true;
+	}
+
+	// This method will wait for a response along the given socket (DatagramSocket), verify that the message data
+	// starts with the magic number 0xC461 and that the message's enclosed sequence number matches the given
+	// expectedSeqNum (int). Upon success, it will print a corresponding message and return true so that the caller
+	// knows whether to send the message again or not.
+	private List<Tor61NodeInfo> waitForFetchResponse(DatagramSocket socket, int expectedSeqNum) {
+		byte[] recvData = new byte[1024];
+		DatagramPacket packet = new DatagramPacket(recvData, recvData.length);
+		// will wait forever until a packet is received, or until timeout occurs
+		try {
+			socket.receive(packet);
+		} catch (SocketTimeoutException e) {
+			return null;
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		List<Tor61NodeInfo> results = new ArrayList<Tor61NodeInfo>();
+
+		// when we get here, we have received a packet with some data
+		// print the data contained in the arriving packet
+		byte[] dataBytes = packet.getData();
+		if (dataBytes[0] != (byte) 0xC4 && dataBytes[1] != (byte) 0x61) {
+			System.out.println("Unknown message: Magic Number mismatch.");
+		} else {
+			int seqNum = dataBytes[2];
+			if (expectedSeqNum != seqNum) { // Do nothing if
+				return null;
+			}
+
+			if (dataBytes[3] == (byte) 0x04) { // FetchResponse
+				int numEntries = dataBytes[4];
+				for (int i = 0; i < numEntries; i++) {
+					long[] ipNums = new long[4];
+					for (int j = 0; j < 4; j++) {
+						ipNums[j] = (dataBytes[5 + i * 10 + j] & 0xff);
+					}
+					long portnum = 0;
+					for (int j = 4; j < 6; j++) {
+						portnum = (portnum << 8) + (dataBytes[5 + i * 10 + j] & 0xff);
+					}
+					long serviceData = 0;
+					for (int j = 6; j < 10; j++) {
+						serviceData = (serviceData << 8) + (dataBytes[5 + i * 10 + j] & 0xff);
+					}
+					String ipAddress = ipNums[0] + "." + ipNums[1] + "." + ipNums[2] + "." +ipNums[3];
+					System.out.println("[" + (i + 1) + "]  " +  ipAddress + "  " + portnum + "  "
+							+ serviceData + " (0x" + Long.toHexString(serviceData) + ")");
+					try {
+						// Adds this router to our list of fetch responses
+						results.add(new Tor61NodeInfo(InetAddress.getByName(ipAddress), (int) portnum, serviceData + ""));
+					} catch (UnknownHostException e) {
+						e.printStackTrace();
+					}
+				}
+				return results;
+			}
+		}
+		return null;
 	}
 }
 
