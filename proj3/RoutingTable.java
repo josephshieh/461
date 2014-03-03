@@ -8,7 +8,9 @@ public class RoutingTable {
 		table = new HashMap<RouterCircuit, RouterCircuit>();
 	}
 
-	public void addRoute(){
-
+	public void addRoute(RouterCircuit start, RouterCircuit end){
+		if(!table.containsKey(start)) {
+			table.put(start, end);
+		}
 	}
 }

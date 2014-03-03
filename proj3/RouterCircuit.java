@@ -3,17 +3,17 @@
  * These will be used in the routing table.
  */
 public class RouterCircuit {
-	int routerNum;
+	long agentId;
 	int circuitId;
 
-	public RouterCircuit(int routerNum, int circuitId) {
-		this.routerNum = routerNum;
+	public RouterCircuit(long routerNum, int circuitId) {
+		this.agentId = routerNum;
 		this.circuitId = circuitId;
 	}
 
 	@Override
 	public int hashCode() {
-		return routerNum * 17 + circuitId;
+		return (agentId + "").hashCode() * 17 + circuitId;
 	}
 
 	@Override
@@ -25,7 +25,7 @@ public class RouterCircuit {
 			return false;
 		}
 		RouterCircuit rc = (RouterCircuit) o;
-		return (this.routerNum == rc.routerNum && this.circuitId == rc.circuitId);
+		return (this.agentId == rc.agentId && this.circuitId == rc.circuitId);
 
 	}
 }

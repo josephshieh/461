@@ -27,14 +27,14 @@ public class Tor61Node {
 		String instance = String.format("%04d", instanceNum);
 		int serviceData = Integer.parseInt(Integer.toHexString(groupNum) + instance, 16);
 
-		// Start the HTTP Proxy
-		HttpProxy proxy = new HttpProxy(httpProxyPort);
-		Thread t1 = new Thread(proxy);
-		t1.start();
-
 		// Start the Tor server socket
 		Tor61Router router = new Tor61Router(serviceData);
-		Thread t2 = new Thread(router);
+		Thread t1 = new Thread(router);
+		t1.start();
+
+		// Start the HTTP Proxy
+		HttpProxy proxy = new HttpProxy(httpProxyPort, router);
+		Thread t2 = new Thread(proxy);
 		t2.start();
 
 		// Upon creation, register this Tor61 Node
@@ -47,8 +47,8 @@ public class Tor61Node {
 		agent.register(router.port, Integer.toString(serviceData),
 				"Tor61Router-" + String.format("%04d", groupNum) + "-" + instance);
 
-		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-1220");
 		// Create a circuit
+		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + groupNum);
 		Random r = new Random();
 		Tor61NodeInfo node = routerInfos.get(r.nextInt(routerInfos.size()));
 		router.connect(node, Integer.toString(serviceData));
@@ -119,7 +119,6 @@ public class Tor61Node {
 		}
 
 		Tor61Node node = new Tor61Node(regServerHost, regServerPort, groupNum, instanceNum, httpProxyPort);
-
 	}
 
 

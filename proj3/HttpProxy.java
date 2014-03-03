@@ -7,18 +7,26 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Random;
 
 /**
  * Joseph Shieh, 1031718, josephs2@uw.edu
  * Sergey Naumets, 1025573, snaumets@uw.edu
- * CSE 461 Networks Project 2, Create an HTTP proxy that handles requests from the client and redirects it to the server.
  */
 public class HttpProxy implements Runnable {
 	ServerSocket proxyServerSocket;
 	int port;
+	Tor61Router router;
+	Map<Integer, Socket> sidToServer;
+	Map<Integer, Socket> sidToClient;
 
-	public HttpProxy(int port) {
+	public HttpProxy(int port, Tor61Router router) {
 		this.port = port;
+		this.router = router;
+		sidToServer = new HashMap<Integer, Socket>();
+		sidToClient = new HashMap<Integer, Socket>();
 	}
 
 	@Override
@@ -81,6 +89,16 @@ public class HttpProxy implements Runnable {
 						}
 						hostAddr = hostString[0];
 						outputLine += inputLine + EOF;
+
+						Random r = new Random();
+						int streamId = r.nextInt(65536);
+						while (sidToServer.containsKey(streamId)){
+							streamId = r.nextInt(65536);
+						}
+						sidToClient.put(streamId, socket);
+						// Send a relay begin cell
+						router.relayBegin();
+
 					} else if (temp.startsWith("connection:")) {
 						// Make connection close instead of
 						outputLine += "Connection: close" + EOF;
