@@ -52,6 +52,7 @@ public class HttpProxy implements Runnable {
 			}
 		}
 	}
+
 	/**
 	 * This is for listening to a specific client's request, and create a new thread to redirect the request
 	 * to the web server.
@@ -97,7 +98,7 @@ public class HttpProxy implements Runnable {
 						}
 						sidToClient.put(streamId, socket);
 						// Send a relay begin cell
-						router.relayBegin();
+						router.relayBegin(streamId, hostAddr + ":" + port);
 
 					} else if (temp.startsWith("connection:")) {
 						// Make connection close instead of

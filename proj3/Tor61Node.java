@@ -32,11 +32,6 @@ public class Tor61Node {
 		Thread t1 = new Thread(router);
 		t1.start();
 
-		// Start the HTTP Proxy
-		HttpProxy proxy = new HttpProxy(httpProxyPort, router);
-		Thread t2 = new Thread(proxy);
-		t2.start();
-
 		// Upon creation, register this Tor61 Node
 		RegistrationAgent agent = null;
 		try {
@@ -52,6 +47,11 @@ public class Tor61Node {
 		Random r = new Random();
 		Tor61NodeInfo node = routerInfos.get(r.nextInt(routerInfos.size()));
 		router.connect(node, Integer.toString(serviceData));
+
+		// Once finished creating circuit, start HTTP Proxy
+		HttpProxy proxy = new HttpProxy(httpProxyPort, router);
+		Thread t2 = new Thread(proxy);
+		t2.start();
 	}
 
 	public static void usage() {

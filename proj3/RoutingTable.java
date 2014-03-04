@@ -13,4 +13,8 @@ public class RoutingTable {
 			table.put(start, end);
 		}
 	}
+
+	public RouterCircuit getDest(RouterCircuit src) {
+		return table.containsKey(src) ? table.get(src) : null;
+	}
 }

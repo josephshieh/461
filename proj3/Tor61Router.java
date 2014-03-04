@@ -45,7 +45,6 @@ public class Tor61Router implements Runnable {
 			open(send, node, serviceData);
 		} else {
 			send = torSockets.get(node);
-
 		}
 		//create?
 
@@ -152,8 +151,40 @@ public class Tor61Router implements Runnable {
 		return new RouterCircuit(agentId, circId);
 	}
 
-	public void relayBegin() {
-
+	public void relayBegin(int streamId, String destAddr) {
+		//String[] destAddrString = destAddr.split(":");
+		//int port = Integer.parseInt(destAddrString[0]);
+		//String destIpAddr = destAddrString[1];
+		byte[] m = new byte[TOR_CELL_LENGTH];
+		RouterCircuit dest = routingTable.getDest(new RouterCircuit(-1, -1)); // (-1, -1) is starting point
+		int circId = -1;
+		if (dest != null) {
+			circId = dest.circuitId;
+		}
+		byte[] circIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(circId).array();
+		m[0] = circIdBytes[2]; // circuit id
+		m[1] = circIdBytes[3];
+		m[2] = (byte) 0x03; // RELAY
+		byte[] sidBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(streamId).array();
+		m[3] = sidBytes[2]; // stream id
+		m[4] = sidBytes[3];
+		for (int i = 5; i < 11; i ++) { // zeroing out zero field and digest field
+			m[i] = 0;
+		}
+		char[] destAddrChars = destAddr.toCharArray();
+		int bodyLength = destAddrChars.length + 1; // plus null terminator
+		byte[] bodyLengthBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(bodyLength).array();
+		m[11] = bodyLengthBytes[2]; // body length
+		m[12] = bodyLengthBytes[3];
+		m[13] = (byte) 0x01; // BEGIN
+		for (int i = 0; i < bodyLength - 1; i ++) {
+			m[i + 14] = (byte) destAddrChars[i];
+		}
+		m[14 + bodyLength] = '\0';
+		Arrays.fill(m, 14 + bodyLength + 1, 512, (byte) 0);
 	}
 
 	@Override
