@@ -107,7 +107,7 @@ public class HttpProxy implements Runnable {
 						// End of request's HTTP header
 						outputLine += EOF;
 						InetAddress destAddr = InetAddress.getByName(hostAddr);
-						SendAndReceive s = new SendAndReceive(destAddr, port, outputLine, outputStream);
+						SendAndReceive s = new SendAndReceive(destAddr, port, outputLine);
 						Thread t = new Thread(s);
 						t.start();
 					} else { // not host or connection
@@ -120,22 +120,21 @@ public class HttpProxy implements Runnable {
 				System.exit(1);
 			}
 		}
+
 		/**
 		 * This is for redirecting requests to the web server and receiving responses back.
 		 */
 		class SendAndReceive implements Runnable {
 			Socket sendAndReceive;
 			String outputLine;
-			OutputStream clientOutputStream;
 
-			public SendAndReceive(InetAddress destAddr, int port, String outputLine, OutputStream clientOutputStream) {
+			public SendAndReceive(InetAddress destAddr, int port, String outputLine) {
 				try {
 					sendAndReceive = new Socket(destAddr, port);
 				} catch (IOException e) {
 					System.out.println("Failed to find socket on web server.");
 				}
 				this.outputLine = outputLine;
-				this.clientOutputStream = clientOutputStream;
 			}
 
 			@Override
@@ -166,9 +165,9 @@ public class HttpProxy implements Runnable {
 							this.clientOutputStream.write(bufferFinal, 0, len);
 						}*/
 						// Write to client as bytes as well
-						this.clientOutputStream.write(buffer, 0, len);
+						//this.clientOutputStream.write(buffer, 0, len);
 					}
-					this.clientOutputStream.flush();
+					//this.clientOutputStream.flush();
 				} catch (IOException e) {
 					//e.printStackTrace();
 				}

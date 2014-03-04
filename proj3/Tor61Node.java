@@ -25,7 +25,7 @@ public class Tor61Node {
 		this.httpProxyPort = httpProxyPort;
 
 		String instance = String.format("%04d", instanceNum);
-		int serviceData = Integer.parseInt(Integer.toHexString(groupNum) + instance, 16);
+		long serviceData = Long.parseLong(Long.toHexString(groupNum) + instance, 16);
 
 		// Start the Tor server socket
 		Tor61Router router = new Tor61Router(serviceData);
@@ -39,14 +39,14 @@ public class Tor61Node {
 		} catch (UnknownHostException e) {
 			e.printStackTrace();
 		}
-		agent.register(router.port, Integer.toString(serviceData),
+		agent.register(router.port, Long.toString(serviceData),
 				"Tor61Router-" + String.format("%04d", groupNum) + "-" + instance);
 
 		// Create a circuit
 		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + groupNum);
 		Random r = new Random();
 		Tor61NodeInfo node = routerInfos.get(r.nextInt(routerInfos.size()));
-		router.connect(node, Integer.toString(serviceData));
+		router.connect(node, Long.toString(serviceData));
 
 		// Once finished creating circuit, start HTTP Proxy
 		HttpProxy proxy = new HttpProxy(httpProxyPort, router);

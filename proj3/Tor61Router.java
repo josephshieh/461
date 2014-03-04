@@ -1,8 +1,11 @@
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -17,17 +20,21 @@ import java.util.Set;
 public class Tor61Router implements Runnable {
 	public static final int TOR_CELL_LENGTH = 512;
 
+	int port;
+	long serviceData;
+	RoutingTable routingTable;
 	Map<Tor61NodeInfo, Socket> torSockets;
 	Map<Long, Set<Integer>> aidToCids;
-	int port;
-	int serviceData;
-	RoutingTable routingTable;
+	Map<Socket, Long> socketToAid; // for getting agent id of sender => look up in routing table
+	Map<Long, Socket> aidToSocket; // for forwarding
 
-	public Tor61Router(int serviceData) {
-		this.torSockets = new HashMap<Tor61NodeInfo, Socket>();
+	public Tor61Router(long serviceData) {
 		this.serviceData = serviceData;
-		this.aidToCids = new HashMap<Long, Set<Integer>>();
 		this.routingTable = new RoutingTable();
+		this.torSockets = new HashMap<Tor61NodeInfo, Socket>();
+		this.aidToCids = new HashMap<Long, Set<Integer>>();
+		this.socketToAid = new HashMap<Socket, Long>();
+		this.aidToSocket = new HashMap<Long, Socket>();
 	}
 
 	public void connect(Tor61NodeInfo node, String serviceData) {
@@ -36,6 +43,7 @@ public class Tor61Router implements Runnable {
 			// Open a new TCP connection
 			try {
 				send = new Socket(node.address.toString().substring(1), node.port);
+				send.setKeepAlive(true);
 				torSockets.put(node, send);
 			} catch (UnknownHostException e) {
 				e.printStackTrace();
@@ -45,6 +53,11 @@ public class Tor61Router implements Runnable {
 			open(send, node, serviceData);
 		} else {
 			send = torSockets.get(node);
+			try {
+				send.setKeepAlive(true);
+			} catch (SocketException e) {
+				e.printStackTrace();
+			}
 		}
 		//create?
 
@@ -72,6 +85,7 @@ public class Tor61Router implements Runnable {
 		Arrays.fill(m, 11, 512, (byte) 0); // pad rest of array with zeros
 		OutputStream outputStream = null;
 		InputStream inputStream = null;
+		DataInputStream dis = null;
 		try {
 			inputStream = send.getInputStream();
 			outputStream = send.getOutputStream();
@@ -80,10 +94,9 @@ public class Tor61Router implements Runnable {
 			outputStream.flush();
 			// Read response from the "opened"
 			byte[] buffer = new byte[TOR_CELL_LENGTH];
-			int len;
-			System.out.println("abc");
-			while((len = inputStream.read(buffer)) > 0) {
-				System.out.println("ha");
+			dis = new DataInputStream(inputStream);
+			while (dis.available() > 0) { // if anything is available, its guaranteed to be 512 bytes
+				dis.readFully(buffer);
 				// Received an "opened" message
 				byte[] circIdBytes = new byte[2];
 				circIdBytes[0] = buffer[0];
@@ -93,6 +106,7 @@ public class Tor61Router implements Runnable {
 				RouterCircuit dest = null;
 				if (type == 6) { // Received "opened" message
 					System.out.println("Received message: OPENED");
+					aidToSocket.put(Long.parseLong(node.serviceData), send);
 					dest = create(send, serviceData);
 				} else if (type == 7) {
 					System.out.println("Open failed");
@@ -103,9 +117,22 @@ public class Tor61Router implements Runnable {
 					System.out.println("Incorrect message received.");
 				}
 			}
-			System.out.println("Done");
 		} catch (IOException e) {
 			e.printStackTrace();
+		} finally {
+			try {
+				if (inputStream != null) {
+					inputStream.close();
+				}
+				if (outputStream != null) {
+					outputStream.close();
+				}
+				if (dis != null) {
+					dis.close();
+				}
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
 		}
 	}
 
@@ -152,14 +179,16 @@ public class Tor61Router implements Runnable {
 	}
 
 	public void relayBegin(int streamId, String destAddr) {
-		//String[] destAddrString = destAddr.split(":");
-		//int port = Integer.parseInt(destAddrString[0]);
-		//String destIpAddr = destAddrString[1];
+		String[] destAddrString = destAddr.split(":");
+		int port = Integer.parseInt(destAddrString[0]);
+		String destIpAddr = destAddrString[1];
 		byte[] m = new byte[TOR_CELL_LENGTH];
 		RouterCircuit dest = routingTable.getDest(new RouterCircuit(-1, -1)); // (-1, -1) is starting point
 		int circId = -1;
+		long agentId = -1;
 		if (dest != null) {
 			circId = dest.circuitId;
+			agentId = dest.agentId;
 		}
 		byte[] circIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
 				.putInt(circId).array();
@@ -185,6 +214,18 @@ public class Tor61Router implements Runnable {
 		}
 		m[14 + bodyLength] = '\0';
 		Arrays.fill(m, 14 + bodyLength + 1, 512, (byte) 0);
+		try {
+			// Send the relay begin cell
+			Tor61NodeInfo destNode = new Tor61NodeInfo(InetAddress.getByName(destIpAddr), port, agentId + "");
+			Socket send = torSockets.get(destNode);
+			OutputStream outputStream = send.getOutputStream();
+			outputStream.write(m);
+			outputStream.flush();
+		} catch (UnknownHostException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 
 	@Override
@@ -217,17 +258,17 @@ public class Tor61Router implements Runnable {
 	 * to the web server.
 	 */
 	class Listen implements Runnable {
-		Socket socket;
+		Socket src;
 		public static final String EOF = "\r\n"; // CR LF String
 		public Listen(Socket client) {
-			this.socket = client;
+			this.src = client;
 		}
 
 		@Override
 		public void run() {
 			try{
-				OutputStream outputStream = socket.getOutputStream();
-				InputStream inputStream = socket.getInputStream();
+				OutputStream outputStream = src.getOutputStream();
+				InputStream inputStream = src.getInputStream();
 				byte[] buffer = new byte[TOR_CELL_LENGTH];
 				int len;
 				// Reading input
@@ -252,9 +293,10 @@ public class Tor61Router implements Runnable {
 							opened = (opened << 8) + (buffer[i] & 0xff);
 						}
 						System.out.println(opener + ", " + opened);
-						Tor61NodeInfo info = new Tor61NodeInfo(socket.getInetAddress(), socket.getLocalPort(), opener + "");
+						Tor61NodeInfo info = new Tor61NodeInfo(src.getInetAddress(), src.getLocalPort(), opener + "");
 						if (serviceData == (int) opened && !torSockets.containsKey(info)) {
-							torSockets.put(info, socket);
+							torSockets.put(info, src);
+							socketToAid.put(src, opener);
 						} else {
 							// Received this message even though wrong address
 
@@ -266,6 +308,7 @@ public class Tor61Router implements Runnable {
 						for (int i = 3; i < TOR_CELL_LENGTH; i ++) { // This includes agent id of opener and opened, and padding
 							m[i] = buffer[i];
 						}
+						socketToAid.put(src, opener);
 					} else if (type == 1) { // Create
 						// Reply with "CREATED"
 						m[0] = buffer[0];
@@ -277,7 +320,50 @@ public class Tor61Router implements Runnable {
 					} else if (type == 4) { // Destroy
 
 					} else if (type == 3) { // Relay
+						long agentId = -1;
+						if (socketToAid.containsKey(src)) {
+							agentId = socketToAid.get(src);
+						}
+						int streamId = 0;
+						// convert the lifetime bytes to a value
+						for (int i = 3; i < 5; i++) {
+							streamId = (streamId << 8) + (buffer[i] & 0xff);
+						}
+						RouterCircuit dest = routingTable.getDest(new RouterCircuit(agentId, circId));
+						if (dest != null) {
+							Socket forward = aidToSocket.get(dest.agentId);
+							int destCircId = dest.circuitId;
+							byte[] destCircIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+									.putInt(destCircId).array();
+							buffer[0] = destCircIdBytes[2]; // circuit id
+							buffer[1] = destCircIdBytes[3];
+							OutputStream forwardOutputStream = forward.getOutputStream();
+							forwardOutputStream.write(buffer);
+							forwardOutputStream.flush();
+						} else { // at the endpoint
+							int bodyLength = 0;
+							for (int i = 11; i < 13; i++) {
+								bodyLength = (bodyLength << 8) + (buffer[i] & 0xff);
+							}
+							int relayCmd = buffer[13];
+							if (relayCmd == 1) { // BEGIN
+								String serverAddr = "";
+								for (int i = 0; i < bodyLength - 1; i ++) { // Don't read null terminator
+									serverAddr += (char) buffer[14 + i];
+								}
+								System.out.println(serverAddr);
+								String[] serverAddrString = serverAddr.split(":");
 
+							} else if (relayCmd == 2) {
+
+							} else if (relayCmd == 3) {
+
+							} else if (relayCmd == 6) {
+
+							} else {
+								System.out.println("Error: Listener class received response.");
+							}
+						}
 					}
 					outputStream.write(m);
 					outputStream.flush();

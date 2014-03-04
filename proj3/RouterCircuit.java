@@ -6,8 +6,8 @@ public class RouterCircuit {
 	long agentId;
 	int circuitId;
 
-	public RouterCircuit(long routerNum, int circuitId) {
-		this.agentId = routerNum;
+	public RouterCircuit(long agentId, int circuitId) {
+		this.agentId = agentId;
 		this.circuitId = circuitId;
 	}
 
