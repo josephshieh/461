@@ -107,9 +107,9 @@ public class HttpProxy implements Runnable {
 						// End of request's HTTP header
 						outputLine += EOF;
 						InetAddress destAddr = InetAddress.getByName(hostAddr);
-						SendAndReceive s = new SendAndReceive(destAddr, port, outputLine);
-						Thread t = new Thread(s);
-						t.start();
+						//SendAndReceive s = new SendAndReceive(destAddr, port, outputLine);
+						//Thread t = new Thread(s);
+						//t.start();
 					} else { // not host or connection
 						outputLine += inputLine + EOF;
 					}
@@ -128,12 +128,13 @@ public class HttpProxy implements Runnable {
 			Socket sendAndReceive;
 			String outputLine;
 
-			public SendAndReceive(InetAddress destAddr, int port, String outputLine) {
-				try {
-					sendAndReceive = new Socket(destAddr, port);
-				} catch (IOException e) {
-					System.out.println("Failed to find socket on web server.");
-				}
+			public SendAndReceive(/*InetAddress destAddr, int port, */String outputLine, Socket webServer) {
+				//try {
+					//sendAndReceive = new Socket(destAddr, port);
+					sendAndReceive = webServer;
+				//} catch (IOException e) {
+					//System.out.println("Failed to find socket on web server.");
+				//}
 				this.outputLine = outputLine;
 			}
 

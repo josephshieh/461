@@ -42,6 +42,11 @@ public class Tor61Node {
 		agent.register(router.port, Long.toString(serviceData),
 				"Tor61Router-" + String.format("%04d", groupNum) + "-" + instance);
 
+		
+		HttpProxy proxy = new HttpProxy(httpProxyPort, router);
+		Thread t2 = new Thread(proxy);
+		t2.start();
+		
 		// Create a circuit
 		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + groupNum);
 		Random r = new Random();
@@ -49,9 +54,9 @@ public class Tor61Node {
 		router.connect(node, Long.toString(serviceData));
 
 		// Once finished creating circuit, start HTTP Proxy
-		HttpProxy proxy = new HttpProxy(httpProxyPort, router);
+		/*HttpProxy proxy = new HttpProxy(httpProxyPort, router);
 		Thread t2 = new Thread(proxy);
-		t2.start();
+		t2.start();*/
 	}
 
 	public static void usage() {
