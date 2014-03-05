@@ -2,7 +2,6 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
@@ -100,9 +99,10 @@ public class Tor61Router implements Runnable {
 		try {
 			inputStream = send.getInputStream();
 			outputStream = send.getOutputStream();
-			// Write to web server as string
+			// Write to web server as bytes
 			outputStream.write(m);
 			outputStream.flush();
+			System.out.println("Sending message: OPEN => {openerAid:" + opener + ",openedAid:" + opened + "}");
 			// Read response from the "opened"
 			byte[] buffer = new byte[TOR_CELL_LENGTH];
 			dis = new DataInputStream(inputStream);
@@ -119,7 +119,7 @@ public class Tor61Router implements Runnable {
 					circId = (circId << 8) + (circIdBytes[i] & 0xff);
 				}
 				int type = buffer[2];
-				
+
 				if (type == 6) { // Received "opened" message
 					System.out.println("Received response: OPENED");
 					aidToSocket.put(Long.parseLong(node.serviceData), send);
@@ -132,7 +132,6 @@ public class Tor61Router implements Runnable {
 					///////////////////////////////////////////////// extract other agent id and circuit id
 					routingTable.addRoute(new RouterCircuit(-1, -1), dest);
 				} else if (type == 3) { // Relay
-					
 					int streamId = 0;
 					// convert the stream id bytes to a value
 					for (int i = 3; i < 5; i++) {
@@ -224,7 +223,7 @@ public class Tor61Router implements Runnable {
 		return new RouterCircuit(agentId, circId);
 	}
 
-	
+
 	/*
 	 * 
 	 */
@@ -232,7 +231,7 @@ public class Tor61Router implements Runnable {
 		String[] destAddrString = destAddr.split(":");
 		int port = Integer.parseInt(destAddrString[1]);
 		String destIpAddr = destAddrString[0];
-		
+
 		byte[] m = new byte[TOR_CELL_LENGTH];
 		RouterCircuit dest = routingTable.getDest(new RouterCircuit(-1, -1)); // (-1, -1) is starting point
 		int circId = -1;
@@ -278,7 +277,7 @@ public class Tor61Router implements Runnable {
 			e.printStackTrace();
 		}
 	}
-	
+
 	/*
 	 * 
 	 */
@@ -309,7 +308,7 @@ public class Tor61Router implements Runnable {
 			outputStream = responseSocket.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
-			
+
 		} catch (UnknownHostException e) {
 			e.printStackTrace();
 		} catch (IOException e) {
@@ -322,7 +321,7 @@ public class Tor61Router implements Runnable {
 					e.printStackTrace();
 				}
 			}
-			
+
 		}
 	}
 
@@ -354,12 +353,13 @@ public class Tor61Router implements Runnable {
 				}
 			}
 		} finally {
-			if (server != null)
+			if (server != null) {
 				try {
 					server.close();
 				} catch (IOException e) {
 					e.printStackTrace();
 				}
+			}
 		}
 
 	}
@@ -417,7 +417,7 @@ public class Tor61Router implements Runnable {
 							socketToAid.put(src, opener);
 						} else {
 							// Received this message even though wrong address
-
+							System.out.println("Received incorrect message");
 						}
 						// Reply with "opened" message
 						m[0] = (byte) 0;
@@ -474,12 +474,12 @@ public class Tor61Router implements Runnable {
 								String[] serverAddrString = serverAddr.split(":");
 								// Open tcp connection with web server
 								Socket webServerSocket = new Socket(serverAddrString[0], Integer.parseInt(serverAddrString[1]));
-								
+
 								// Successfully established tcp connection with web server
 								// add an entry to the response routing table that would allow us to send a response back to the node who
 								// sent this relay message via the same circuit
 								responseRoutingTable.put(streamId, new RouterCircuit(agentId, circId));
-								
+
 								// Send back "Connected" response
 								connected(streamId, circId, src);
 							} else if (relayCmd == 2) {
