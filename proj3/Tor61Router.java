@@ -376,7 +376,7 @@ public class Tor61Router implements Runnable {
 		for (int i = 5; i < 11; i ++) { // zeroing out zero field and digest field
 			m[i] = 0;
 		}
-		char[] destAddrChars = (destNode.address.toString() + ":" + destNode.port).toCharArray();
+		char[] destAddrChars = (destNode.address.toString().substring(1) + ":" + destNode.port).toCharArray();
 		int destAddrLen = destAddrChars.length;
 		int bodyLength = destAddrLen + 1 + 4; // plus null terminator + agentId
 		byte[] bodyLengthBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
@@ -393,6 +393,11 @@ public class Tor61Router implements Runnable {
 		for (int i = 0; i < 4; i ++) {
 			m[14 + destAddrLen + 1 + i] = agentIdBytes[4 + i]; // Service data
 		}
+		System.out.println("relay extend");
+		System.out.println("ip: " + destNode.address.toString().substring(1));
+		System.out.println("port: " + destNode.port);
+		System.out.println("bodylength: " + bodyLength);
+		System.out.println("agentId: " + agentId);
 		Arrays.fill(m, 14 + bodyLength, 512, (byte) 0);
 		try {
 			// Send the relay extend cell
@@ -494,14 +499,14 @@ public class Tor61Router implements Runnable {
 
 		}*/
 	}
-	
+
 	/*
 	 * 
 	 */
 	public void addNewQueueForSocket(Socket socket) {
 		socketToQueue.put(socket, new LinkedBlockingQueue<Tor61Cell>());
 	}
-	
+
 	/*
 	 * 
 	 */
@@ -512,7 +517,7 @@ public class Tor61Router implements Runnable {
 			e.printStackTrace();
 		}
 	}
-	
+
 	/*
 	 * 
 	 */
@@ -523,7 +528,7 @@ public class Tor61Router implements Runnable {
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 			return null;
-		} 
+		}
 		return cell;
 	}
 
@@ -688,11 +693,11 @@ public class Tor61Router implements Runnable {
 								// Open tcp connection with web server
 								Socket webServerSocket = new Socket(serverAddrString[0], Integer.parseInt(serverAddrString[1]));
 								sidToWebServerSockets.put(streamId, webServerSocket);
-								
+
 								// add a new blocking queue associated with this socket to the router side so it can write to the queue
 								// cells that it wants to forward to this socket
 								addNewQueueForSocket(webServerSocket);
-								
+
 								// Start a writer thread that will constantly read from a blocking queue and write to the socket
 								makeWriter(webServerSocket);
 
@@ -718,6 +723,8 @@ public class Tor61Router implements Runnable {
 								System.out.println(bodyStrings.length);
 								String destAddr = bodyStrings[0].split(":")[0];
 								int destPort = Integer.parseInt(bodyStrings[0].split(":")[1]);
+								System.out.println(destAddr);
+								System.out.println(destPort);
 								long destAid = Long.parseLong(bodyStrings[1]);
 								// Once we get relay extend at end point, connect with new node
 								connect(new Tor61NodeInfo(InetAddress.getByName(destAddr), destPort, Long.toString(destAid)),
@@ -739,13 +746,13 @@ public class Tor61Router implements Runnable {
 			}
 		}
 	}
-	
+
 	/**
 	 * This will read from a blocking queue that is associated with the given socket (in router side), and write to the given socket.
 	 */
 	class Writer implements Runnable {
 		Socket socket;
-		
+
 		public Writer(Socket client) {
 			this.socket = client;
 		}
@@ -754,7 +761,7 @@ public class Tor61Router implements Runnable {
 		public void run() {
 			while (true) {
 				Tor61Cell cell = takeFromQueue(this.socket); // this call will block until an element is returned
-				
+
 				if (cell != null) { // if the wait for a non emtpy queue was interrupted
 					// extra the byte array message and forward it to the socket
 					byte[] message = cell.data;
@@ -771,7 +778,7 @@ public class Tor61Router implements Runnable {
 			}
 		}
 	}
-	
+
 	/*
 	 * 
 	 */
