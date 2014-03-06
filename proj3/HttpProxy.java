@@ -93,13 +93,14 @@ public class HttpProxy implements Runnable {
 
 						Random r = new Random();
 						int streamId = r.nextInt(65536);
-						while (sidToServer.containsKey(streamId)){
+						while (sidToClient.containsKey(streamId)){
 							streamId = r.nextInt(65536);
 						}
 						sidToClient.put(streamId, socket);
 						// Send a relay begin cell
 						router.relayBegin(streamId, hostAddr + ":" + port);
-
+						System.out.println("Breaking from http proxy while loop");
+						break;
 					} else if (temp.startsWith("connection:")) {
 						// Make connection close instead of
 						outputLine += "Connection: close" + EOF;

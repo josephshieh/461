@@ -1,4 +1,5 @@
 import java.io.DataInputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -27,6 +28,7 @@ public class Tor61Router implements Runnable {
 	Map<Socket, Long> socketToAid; // for getting agent id of sender => look up in routing table, <Socket, srcAgentId>
 	Map<Long, Socket> aidToSocket; // for forwarding, <destAgentId, Socket>
 	Map<Integer, RouterCircuit> responseRoutingTable; // multiplexing stream ids to circuits, <streamId, <startAgentId, startCircuit>>
+	Map<Integer, Socket> sidToWebServerSockets; // so we know which web server to deliver packets to once at endpoint of circuit
 
 	/*
 	 * 
@@ -39,6 +41,7 @@ public class Tor61Router implements Runnable {
 		this.socketToAid = new HashMap<Socket, Long>();
 		this.aidToSocket = new HashMap<Long, Socket>();
 		this.responseRoutingTable = new HashMap<Integer, RouterCircuit>();
+		this.sidToWebServerSockets = new HashMap<Integer, Socket>();
 	}
 
 	/*
@@ -102,13 +105,23 @@ public class Tor61Router implements Runnable {
 			// Write to web server as bytes
 			outputStream.write(m);
 			outputStream.flush();
-			System.out.println("Sending message: OPEN => {openerAid:" + opener + ",openedAid:" + opened + "}");
+			
+			String serviceNameHex = Long.toString(this.serviceData, 16);
+			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
+			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
+			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
+			System.out.println(nodeName + " Sending message: OPEN => {openerAid:" + serviceData + ", openedAid:" + node.serviceData + "}");
 			// Read response from the "opened"
 			byte[] buffer = new byte[TOR_CELL_LENGTH];
 			dis = new DataInputStream(inputStream);
 			RouterCircuit dest = null; // so it is not reset every iteration
 			while (dis.available() >= 0) { // if anything is available, its guaranteed to be 512 bytes
-				dis.readFully(buffer);
+				try {
+					dis.readFully(buffer);
+				} catch (EOFException e) {
+					System.out.println("Caught eof exception");
+					continue;
+				}
 				// Received an "opened" message
 				byte[] circIdBytes = new byte[2];
 				circIdBytes[0] = buffer[0];
@@ -121,14 +134,13 @@ public class Tor61Router implements Runnable {
 				int type = buffer[2];
 
 				if (type == 6) { // Received "opened" message
-					System.out.println("Received response: OPENED");
+					System.out.println(nodeName + " Received response: OPENED");
 					aidToSocket.put(Long.parseLong(node.serviceData), send);
 					dest = create(send, serviceData);
-					System.out.println("dest:"+ (dest != null));
 				} else if (type == 7) { // Open Failed
-					System.out.println("Open failed");
+					System.out.println(nodeName + " Open failed");
 				} else if (type == 2) { // Created
-					System.out.println("Received response: CREATED");
+					System.out.println(nodeName + " Received response: CREATED");
 					///////////////////////////////////////////////// extract other agent id and circuit id
 					routingTable.addRoute(new RouterCircuit(-1, -1), dest);
 				} else if (type == 3) { // Relay
@@ -143,22 +155,22 @@ public class Tor61Router implements Runnable {
 					}
 					int relayCmd = buffer[13];
 					if (relayCmd == 4) { // Connected
-						System.out.println("Received: RELAY CONNECTED");
+						System.out.println(nodeName + " Received: RELAY CONNECTED");
 						// Start sending relay data cells
 					} else if (relayCmd == 7) {
-						System.out.println("Received: RELAY EXTENDED");
+						System.out.println(nodeName + " Received: RELAY EXTENDED");
 					} else if (relayCmd == 11) {
-						System.out.println("Received: RELAY BEGIN FAILED");
+						System.out.println(nodeName + " Received: RELAY BEGIN FAILED");
 					} else if (relayCmd == 12) {
-						System.out.println("Received: RELAY EXTEND FAILED");
+						System.out.println(nodeName + " Received: RELAY EXTEND FAILED");
 					} else {
-						System.out.println("Error: Sender class received requests.");
+						System.out.println(nodeName + " Error: Sender class received requests.");
 					}
 				} else {
-					System.out.println("Incorrect message received.");
+					System.out.println(nodeName + " Incorrect message received. {circId: " + circId +", type: " + type + "}");
 				}
 			}
-			System.out.println("Exit loop, shouldnt be here."); //////////////////////////////////////////////////////////
+			System.out.println(nodeName + " Exit loop, shouldnt be here."); //////////////////////////////////////////////////////////
 		} catch (IOException e) {
 			e.printStackTrace();
 		} finally {
@@ -268,6 +280,11 @@ public class Tor61Router implements Runnable {
 			// Send the relay begin cell
 			Socket send = aidToSocket.get(dest.agentId); // get the socket that we need to write to
 			//Socket send = torSockets.get(destNode);
+			String serviceNameHex = Long.toString(this.serviceData, 16);
+			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
+			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
+			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
+			System.out.println(nodeName + " Sending message: RELAY BEGIN");
 			OutputStream outputStream = send.getOutputStream(); //send.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
@@ -305,6 +322,11 @@ public class Tor61Router implements Runnable {
 		OutputStream outputStream = null;
 		try {
 			// Send the relay connected response cell
+			String serviceNameHex = Long.toString(this.serviceData, 16);
+			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
+			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
+			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
+			System.out.println(nodeName + " Sending message: RELAY CONNECTED");
 			outputStream = responseSocket.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
@@ -344,8 +366,10 @@ public class Tor61Router implements Runnable {
 			while (true) { // Listen forever, terminated by Ctrl-C
 				try {
 					Socket client = server.accept();
+					client.setKeepAlive(true);
+					//client.setSoTimeout(30000); // Set longer timeout for now
 					// Now that we have a client to to communicate with, create new thread
-					Listen l = new Listen(client);
+					Listen l = new Listen(client, this.serviceData);
 					Thread t = new Thread(l);
 					t.start();
 				} catch (IOException e) {
@@ -370,9 +394,11 @@ public class Tor61Router implements Runnable {
 	 */
 	class Listen implements Runnable {
 		Socket src;
+		long serviceData; // will allow us to print the name of the router who prints messages
 		public static final String EOF = "\r\n"; // CR LF String
-		public Listen(Socket client) {
+		public Listen(Socket client, long serviceData) {
 			this.src = client;
+			this.serviceData = serviceData;
 		}
 
 		/*
@@ -383,6 +409,10 @@ public class Tor61Router implements Runnable {
 			OutputStream outputStream = null;
 			InputStream inputStream = null;
 			DataInputStream dis = null;
+			String serviceNameHex = Long.toString(this.serviceData, 16);
+			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
+			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
+			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
 			try{
 				outputStream = src.getOutputStream();
 				inputStream = src.getInputStream();
@@ -410,14 +440,14 @@ public class Tor61Router implements Runnable {
 						for (int i = 7; i < 11; i++) {
 							opened = (opened << 8) + (buffer[i] & 0xff);
 						}
-						System.out.println("Received message: OPEN => {openerAid:" + opener + ", openedAid:" + opened + "}");
+						System.out.println(nodeName + " Received message: OPEN => {openerAid:" + opener + ", openedAid:" + opened + "}");
 						Tor61NodeInfo info = new Tor61NodeInfo(src.getInetAddress(), src.getLocalPort(), opener + "");
 						if (serviceData == (int) opened && !torSockets.containsKey(info)) {
 							torSockets.put(info, src);
 							socketToAid.put(src, opener);
 						} else {
 							// Received this message even though wrong address
-							System.out.println("Received incorrect message");
+							System.out.println(nodeName + " Received incorrect message. {circId: " + circId +", type: " + type + "}");
 						}
 						// Reply with "opened" message
 						m[0] = (byte) 0;
@@ -428,7 +458,7 @@ public class Tor61Router implements Runnable {
 						}
 						socketToAid.put(src, opener);
 					} else if (type == 1) { // Create
-						System.out.println("Received message: CREATE => {circuitDd:" + circId + "}");
+						System.out.println(nodeName + " Received message: CREATE => {circuitId:" + circId + "}");
 						// Reply with "CREATED"
 						m[0] = buffer[0];
 						m[1] = buffer[1];
@@ -470,10 +500,11 @@ public class Tor61Router implements Runnable {
 								for (int i = 0; i < bodyLength - 1; i ++) { // Don't read null terminator
 									serverAddr += (char) buffer[14 + i];
 								}
-								System.out.println(serverAddr);
+								//System.out.println(serverAddr);
 								String[] serverAddrString = serverAddr.split(":");
 								// Open tcp connection with web server
 								Socket webServerSocket = new Socket(serverAddrString[0], Integer.parseInt(serverAddrString[1]));
+								sidToWebServerSockets.put(streamId, webServerSocket);
 
 								// Successfully established tcp connection with web server
 								// add an entry to the response routing table that would allow us to send a response back to the node who
@@ -489,7 +520,7 @@ public class Tor61Router implements Runnable {
 							} else if (relayCmd == 6) {
 
 							} else {
-								System.out.println("Error: Listener class received response.");
+								System.out.println(nodeName + " Error: Listener class received response.");
 							}
 						}
 					}
@@ -497,7 +528,7 @@ public class Tor61Router implements Runnable {
 					outputStream.write(m);
 					outputStream.flush();
 				}
-				System.out.println("Exit loop 2, shouldnt be here.");
+				System.out.println(nodeName + " Exit loop 2, shouldnt be here.");///////////////////////////////////////
 			} catch (IOException e) {
 				e.printStackTrace();
 				//System.out.println("Failed to get socket.");

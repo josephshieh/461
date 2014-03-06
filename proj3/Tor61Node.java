@@ -24,8 +24,8 @@ public class Tor61Node {
 		this.instanceNum = instanceNum;
 		this.httpProxyPort = httpProxyPort;
 
-		String instance = String.format("%04d", instanceNum);
-		long serviceData = Long.parseLong(Long.toHexString(groupNum) + instance, 16);
+		String instanceHex = String.format("%04d", Integer.valueOf(Long.toHexString(instanceNum), 16));
+		long serviceData = Long.parseLong(Long.toHexString(groupNum) + instanceHex, 16);
 
 		// Start the Tor server socket
 		Tor61Router router = new Tor61Router(serviceData);
@@ -40,7 +40,7 @@ public class Tor61Node {
 			e.printStackTrace();
 		}
 		agent.register(router.port, Long.toString(serviceData),
-				"Tor61Router-" + String.format("%04d", groupNum) + "-" + instance);
+				"Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum));
 
 		// Once finished creating circuit, start HTTP Proxy
 		HttpProxy proxy = new HttpProxy(httpProxyPort, router);
