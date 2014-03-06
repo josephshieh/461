@@ -435,6 +435,9 @@ public class Tor61Router implements Runnable {
 		m[13] = (byte) 0x07; // EXTEND
 		Arrays.fill(m, 14, 512, (byte) 0);
 		try {
+			System.out.println("srcNotNull:" + (src != null));
+			System.out.println("aidToSocketKey:" + aidToSocket.containsKey(src.agentId));
+			System.out.println("aidToSockNotNull:" + (aidToSocket.get(src.agentId) != null));
 			OutputStream outputStream = aidToSocket.get(src.agentId).getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
@@ -720,23 +723,27 @@ public class Tor61Router implements Runnable {
 								int count = 0;
 								char c;
 								int indexOfNull = -1;
+								long destAid = 0;
 								while (count < bodyLength) {
-									if ((c = (char)buffer[14 + count]) != '\0') {
+									if (((c = (char)buffer[14 + count]) != '\0') && indexOfNull == -1) { // body up to the '\0'
 										body += c;
 										System.out.println(body);
-									} else {
-										System.out.println("WTF");
+									} else if (((c = (char)buffer[14 + count]) != '\0') && indexOfNull != -1) { // build up agent id after '\0'
+										for (int i = 0; i < 4; i++) {
+											destAid = (destAid << 8) + (buffer[i + 14 + count] & 0xff);
+										}
+										break;
+									} else { // set the index of the '\0'
 										indexOfNull = count;
+										System.out.println(indexOfNull);
 									}
 									count ++;
 								}
 								System.out.println("body:" + body);
-								System.out.println(indexOfNull);
 								String destAddr = body.substring(0, indexOfNull).split(":")[0];
 								int destPort = Integer.parseInt(body.substring(0, indexOfNull).split(":")[1]);
 								System.out.println(destAddr);
 								System.out.println(destPort);
-								long destAid = Long.parseLong(body.substring(indexOfNull));
 								System.out.println("destAid:" + destAid);
 								// Once we get relay extend at end point, connect with new node
 								connect(new Tor61NodeInfo(InetAddress.getByName(destAddr), destPort, Long.toString(destAid)),

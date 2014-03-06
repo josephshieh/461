@@ -83,6 +83,7 @@ public class Tor61Node {
 				Tor61NodeInfo node2 = routerInfos.get(hop2);
 				router.relayExtend(node2);
 
+				// Create third hop
 				routerInfos.remove(hop2);
 				if (routerInfos.size() < 1) {
 					System.out.println("We form a circuit of length 3 with unique nodes.");
@@ -93,7 +94,6 @@ public class Tor61Node {
 					Tor61NodeInfo node3 = routerInfos.get(hop3);
 					router.relayExtend(node3);
 				}
-
 			}
 		}
 	}
