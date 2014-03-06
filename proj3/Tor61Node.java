@@ -49,8 +49,21 @@ public class Tor61Node {
 		// Create a circuit
 		// Fetch all nodes that are ours
 		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + String.format("%04d", groupNum));
-		Random r = new Random();
-		Tor61NodeInfo node = routerInfos.get(r.nextInt(routerInfos.size()));
-		router.connect(node, Long.toString(serviceData));
+		
+		// Remove our own node from the fetched list
+		for (int i = 0; i < routerInfos.size(); i++) {
+			Tor61NodeInfo item = routerInfos.get(i);
+			if (item.serviceData.equals(Long.toString(serviceData))) {
+				routerInfos.remove(i);
+			}
+		}
+		if (routerInfos.size() < 1) {
+			System.out.println("We form a circuit of length 3 with unique nodes.");
+			System.out.println("Circuit not created.");
+		} else {
+			Random r = new Random();
+			Tor61NodeInfo node = routerInfos.get(r.nextInt(routerInfos.size()));
+			router.connect(node, Long.toString(serviceData));
+		}
 	}
 }
