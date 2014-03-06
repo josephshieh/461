@@ -93,7 +93,7 @@ public class HttpProxy implements Runnable {
 
 						Random r = new Random();
 						int streamId = r.nextInt(65536);
-						while (sidToServer.containsKey(streamId)){
+						while (sidToClient.containsKey(streamId)){
 							streamId = r.nextInt(65536);
 						}
 						sidToClient.put(streamId, socket);
@@ -130,10 +130,10 @@ public class HttpProxy implements Runnable {
 
 			public SendAndReceive(/*InetAddress destAddr, int port, */String outputLine, Socket webServer) {
 				//try {
-					//sendAndReceive = new Socket(destAddr, port);
-					sendAndReceive = webServer;
+				//sendAndReceive = new Socket(destAddr, port);
+				sendAndReceive = webServer;
 				//} catch (IOException e) {
-					//System.out.println("Failed to find socket on web server.");
+				//System.out.println("Failed to find socket on web server.");
 				//}
 				this.outputLine = outputLine;
 			}

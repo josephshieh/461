@@ -61,7 +61,6 @@ public class Tor61Main {
 			System.out.println("The given HTTP Proxy Port was not an integer.");
 			usage();
 		}
-
 		Tor61Node node = new Tor61Node(regServerHost, regServerPort, groupNum, instanceNum, httpProxyPort);
 	}
 

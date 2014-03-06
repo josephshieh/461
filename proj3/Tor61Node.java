@@ -23,7 +23,7 @@ public class Tor61Node {
 		this.groupNum = groupNum;
 		this.instanceNum = instanceNum;
 		this.httpProxyPort = httpProxyPort;
-
+		System.out.println("Group num: " + groupNum + ", Instance num: " + instanceNum);
 		String instance = String.format("%04d", instanceNum);
 		long serviceData = Long.parseLong(Long.toHexString(groupNum) + instance, 16);
 
@@ -49,7 +49,7 @@ public class Tor61Node {
 
 		// Create a circuit
 		// Fetch all nodes that are ours
-		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + groupNum);
+		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + String.format("%04d", groupNum));
 		Random r = new Random();
 		Tor61NodeInfo node = routerInfos.get(r.nextInt(routerInfos.size()));
 		router.connect(node, Long.toString(serviceData));

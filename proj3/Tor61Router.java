@@ -49,6 +49,7 @@ public class Tor61Router implements Runnable {
 		if (!torSockets.containsKey(node)) {
 			// Open a new TCP connection
 			try {
+				System.out.println(node.address.toString());
 				send = new Socket(node.address.toString().substring(1), node.port);
 				send.setKeepAlive(true);
 				torSockets.put(node, send);
@@ -102,7 +103,7 @@ public class Tor61Router implements Runnable {
 			// Write to web server as bytes
 			outputStream.write(m);
 			outputStream.flush();
-			System.out.println("Sending message: OPEN => {openerAid:" + opener + ",openedAid:" + opened + "}");
+			System.out.println("Sending message: OPEN => {openerAid:" + serviceData + ",openedAid:" + node.serviceData + "}");
 			// Read response from the "opened"
 			byte[] buffer = new byte[TOR_CELL_LENGTH];
 			dis = new DataInputStream(inputStream);
@@ -119,7 +120,6 @@ public class Tor61Router implements Runnable {
 					circId = (circId << 8) + (circIdBytes[i] & 0xff);
 				}
 				int type = buffer[2];
-
 				if (type == 6) { // Received "opened" message
 					System.out.println("Received response: OPENED");
 					aidToSocket.put(Long.parseLong(node.serviceData), send);
@@ -217,6 +217,7 @@ public class Tor61Router implements Runnable {
 			OutputStream outputStream = send.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
+			System.out.println("Sending message: CREATE");
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -237,6 +238,7 @@ public class Tor61Router implements Runnable {
 		int circId = -1;
 		long agentId = -1;
 		if (dest != null) {
+			System.out.println("There is a dest");
 			circId = dest.circuitId;
 			agentId = dest.agentId;
 		}
@@ -268,6 +270,7 @@ public class Tor61Router implements Runnable {
 			// Send the relay begin cell
 			Socket send = aidToSocket.get(dest.agentId); // get the socket that we need to write to
 			//Socket send = torSockets.get(destNode);
+			System.out.println("Sending message: RELAY BEGIN");
 			OutputStream outputStream = send.getOutputStream(); //send.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
@@ -493,6 +496,7 @@ public class Tor61Router implements Runnable {
 							}
 						}
 					}
+					System.out.println("Type: " + type);
 					//System.out.println("Writing...");
 					outputStream.write(m);
 					outputStream.flush();
