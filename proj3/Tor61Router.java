@@ -1,5 +1,4 @@
 import java.io.DataInputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -47,23 +46,22 @@ public class Tor61Router implements Runnable {
 	/*
 	 * 
 	 */
-	public void connect(Tor61NodeInfo node, String serviceData) {
+	public void connect(Tor61NodeInfo destNode, String serviceData) {
 		Socket send = null;
-		if (!torSockets.containsKey(node)) {
+		if (!torSockets.containsKey(destNode)) {
 			// Open a new TCP connection
 			try {
-				System.out.println(node.address.toString());
-				send = new Socket(node.address.toString().substring(1), node.port);
+				send = new Socket(destNode.address.toString().substring(1), destNode.port);
 				send.setKeepAlive(true);
-				torSockets.put(node, send);
+				torSockets.put(destNode, send);
 			} catch (UnknownHostException e) {
 				e.printStackTrace();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-			open(send, node, serviceData);
+			open(send, destNode, serviceData);
 		} else {
-			send = torSockets.get(node);
+			send = torSockets.get(destNode);
 			try {
 				send.setKeepAlive(true);
 			} catch (SocketException e) {
@@ -77,7 +75,7 @@ public class Tor61Router implements Runnable {
 	/*
 	 * 
 	 */
-	public void open(Socket send, Tor61NodeInfo node, String serviceData) {
+	public void open(Socket send, Tor61NodeInfo destNode, String serviceData) {
 		// Can only assign odd numbers to circuit id
 		// Send "open" message
 		byte[] m = new byte[TOR_CELL_LENGTH];
@@ -91,7 +89,7 @@ public class Tor61Router implements Runnable {
 		m[5] = opener[6];
 		m[6] = opener[7];
 		byte[] opened = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
-				.putLong(Long.parseLong(node.serviceData)).array();
+				.putLong(Long.parseLong(destNode.serviceData)).array();
 		m[7] = opened[4]; // Service data
 		m[8] = opened[5];
 		m[9] = opened[6];
@@ -110,18 +108,19 @@ public class Tor61Router implements Runnable {
 			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
 			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
 			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
-			System.out.println(nodeName + " Sending message: OPEN => {openerAid:" + serviceData + ", openedAid:" + node.serviceData + "}");
+			System.out.println(nodeName + " Sending message: OPEN => {openerAid:" + serviceData + ", openedAid:" + destNode.serviceData + "}");
 			// Read response from the "opened"
 			byte[] buffer = new byte[TOR_CELL_LENGTH];
 			dis = new DataInputStream(inputStream);
 			RouterCircuit dest = null; // so it is not reset every iteration
 			while (dis.available() >= 0) { // if anything is available, its guaranteed to be 512 bytes
-				try {
-					dis.readFully(buffer);
+				dis.readFully(buffer);
+				/*try {
+
 				} catch (EOFException e) {
-					System.out.println("Caught eof exception");
+					//System.out.println("Caught eof exception");
 					continue;
-				}
+				}*/
 				// Received an "opened" message
 				byte[] circIdBytes = new byte[2];
 				circIdBytes[0] = buffer[0];
@@ -134,14 +133,16 @@ public class Tor61Router implements Runnable {
 				int type = buffer[2];
 				if (type == 6) { // Received "opened" message
 					System.out.println(nodeName + " Received response: OPENED");
-					aidToSocket.put(Long.parseLong(node.serviceData), send);
-					dest = create(send, serviceData);
+					aidToSocket.put(Long.parseLong(destNode.serviceData), send);
+					dest = create(send, destNode.serviceData);
 				} else if (type == 7) { // Open Failed
 					System.out.println(nodeName + " Open failed");
 				} else if (type == 2) { // Created
 					System.out.println(nodeName + " Received response: CREATED");
 					///////////////////////////////////////////////// extract other agent id and circuit id
 					routingTable.addRoute(new RouterCircuit(-1, -1), dest);
+					// Try to relay extend
+					//relayExtend(destNode);
 				} else if (type == 3) { // Relay
 					int streamId = 0;
 					// convert the stream id bytes to a value
@@ -296,6 +297,57 @@ public class Tor61Router implements Runnable {
 		}
 	}
 
+	public void relayExtend(RouterCircuit dest) {
+		if (dest == null) {
+			throw new IllegalArgumentException();
+		}
+		byte[] m = new byte[TOR_CELL_LENGTH];
+		int circId = -1;
+		long agentId = -1;
+
+		byte[] circIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(circId).array();
+		m[0] = circIdBytes[2]; // circuit id
+		m[1] = circIdBytes[3];
+		m[2] = (byte) 0x03; // RELAY
+		byte[] sidBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(streamId).array();
+		m[3] = sidBytes[2]; // stream id
+		m[4] = sidBytes[3];
+		for (int i = 5; i < 11; i ++) { // zeroing out zero field and digest field
+			m[i] = 0;
+		}
+		char[] destAddrChars = destAddr.toCharArray();
+		int bodyLength = destAddrChars.length + 1; // plus null terminator
+		byte[] bodyLengthBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(bodyLength).array();
+		m[11] = bodyLengthBytes[2]; // body length
+		m[12] = bodyLengthBytes[3];
+		m[13] = (byte) 0x01; // BEGIN
+		for (int i = 0; i < bodyLength - 1; i ++) {
+			m[i + 14] = (byte) destAddrChars[i];
+		}
+		m[14 + bodyLength] = '\0';
+		Arrays.fill(m, 14 + bodyLength + 1, 512, (byte) 0);
+		try {
+			// Send the relay begin cell
+			Socket send = aidToSocket.get(dest.agentId); // get the socket that we need to write to
+			//Socket send = torSockets.get(destNode);
+			String serviceNameHex = Long.toString(this.serviceData, 16);
+			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
+			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
+			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
+			System.out.println(nodeName + " Sending message: RELAY BEGIN");
+			OutputStream outputStream = send.getOutputStream(); //send.getOutputStream();
+			outputStream.write(m);
+			outputStream.flush();
+		} catch (UnknownHostException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
 	/*
 	 * 
 	 */
@@ -336,15 +388,6 @@ public class Tor61Router implements Runnable {
 			e.printStackTrace();
 		} catch (IOException e) {
 			e.printStackTrace();
-		} finally {
-			if (outputStream != null) {
-				try {
-					outputStream.close();
-				} catch (IOException e) {
-					e.printStackTrace();
-				}
-			}
-
 		}
 	}
 
@@ -496,7 +539,9 @@ public class Tor61Router implements Runnable {
 								bodyLength = (bodyLength << 8) + (buffer[i] & 0xff);
 							}
 							int relayCmd = buffer[13];
+							System.out.println("relayCmd: " + relayCmd);
 							if (relayCmd == 1) { // BEGIN
+								System.out.println(nodeName + " Received message: RELAY BEGIN");
 								String serverAddr = "";
 								for (int i = 0; i < bodyLength - 1; i ++) { // Don't read null terminator
 									serverAddr += (char) buffer[14 + i];
@@ -511,7 +556,7 @@ public class Tor61Router implements Runnable {
 								// add an entry to the response routing table that would allow us to send a response back to the node who
 								// sent this relay message via the same circuit
 								responseRoutingTable.put(streamId, new RouterCircuit(agentId, circId));
-
+								System.out.println("After receiving relay begin, socket isClosed:" + src.isClosed());
 								// Send back "Connected" response
 								connected(streamId, circId, src);
 							} else if (relayCmd == 2) {
@@ -525,6 +570,7 @@ public class Tor61Router implements Runnable {
 							}
 						}
 					}
+					System.out.println(src.isClosed());
 					System.out.println("Type: " + type);
 					//System.out.println("Writing...");
 					outputStream.write(m);
