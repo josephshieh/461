@@ -1,4 +1,5 @@
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -52,7 +53,7 @@ public class Tor61Router implements Runnable {
 		if (!torSockets.containsKey(node)) {
 			// Open a new TCP connection
 			try {
-				System.out.println(node.address.toString());
+				//System.out.println(node.address.toString());
 				send = new Socket(node.address.toString().substring(1), node.port);
 				send.setKeepAlive(true);
 				torSockets.put(node, send);
@@ -116,12 +117,12 @@ public class Tor61Router implements Runnable {
 			dis = new DataInputStream(inputStream);
 			RouterCircuit dest = null; // so it is not reset every iteration
 			while (dis.available() >= 0) { // if anything is available, its guaranteed to be 512 bytes
-				try {
+				//try {
 					dis.readFully(buffer);
-				} catch (EOFException e) {
-					System.out.println("Caught eof exception");
-					continue;
-				}
+				//} catch (EOFException e) { // When other node closes
+					//System.out.println("Caught eof exception");
+					//continue;
+				//}
 				// Received an "opened" message
 				byte[] circIdBytes = new byte[2];
 				circIdBytes[0] = buffer[0];
@@ -135,7 +136,7 @@ public class Tor61Router implements Runnable {
 				if (type == 6) { // Received "opened" message
 					System.out.println(nodeName + " Received response: OPENED");
 					aidToSocket.put(Long.parseLong(node.serviceData), send);
-					dest = create(send, serviceData);
+					dest = create(send, node.serviceData);
 				} else if (type == 7) { // Open Failed
 					System.out.println(nodeName + " Open failed");
 				} else if (type == 2) { // Created
@@ -228,7 +229,11 @@ public class Tor61Router implements Runnable {
 			OutputStream outputStream = send.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
-			System.out.println("Sending message: CREATE");
+			String serviceNameHex = Long.toString(this.serviceData, 16);
+			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
+			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
+			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
+			System.out.println(nodeName + " Sending message: CREATE");
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -249,10 +254,10 @@ public class Tor61Router implements Runnable {
 		int circId = -1;
 		long agentId = -1;
 		if (dest != null) {
-			System.out.println("There is a dest");
 			circId = dest.circuitId;
 			agentId = dest.agentId;
 		}
+		System.out.println("agentid:" + agentId);
 		byte[] circIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
 				.putInt(circId).array();
 		m[0] = circIdBytes[2]; // circuit id
@@ -336,7 +341,7 @@ public class Tor61Router implements Runnable {
 			e.printStackTrace();
 		} catch (IOException e) {
 			e.printStackTrace();
-		} finally {
+		} /*finally { // closing this stream also closed the socket
 			if (outputStream != null) {
 				try {
 					outputStream.close();
@@ -345,7 +350,7 @@ public class Tor61Router implements Runnable {
 				}
 			}
 
-		}
+		}*/
 	}
 
 	/*
@@ -422,7 +427,7 @@ public class Tor61Router implements Runnable {
 				//int len;
 				// Reading input
 				while(dis.available() >= 0) { // if anything is available, its guaranteed to be 512 bytes
-					dis.readFully(buffer);
+					dis.readFully(buffer); // EOFException when other node closes
 					//System.out.println("read");
 					int circId = 0;
 					// convert the circuit id bytes to a value
@@ -525,7 +530,6 @@ public class Tor61Router implements Runnable {
 							}
 						}
 					}
-					System.out.println("Type: " + type);
 					//System.out.println("Writing...");
 					outputStream.write(m);
 					outputStream.flush();
