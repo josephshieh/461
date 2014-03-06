@@ -19,6 +19,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 
 public class Tor61Router implements Runnable {
@@ -33,7 +35,7 @@ public class Tor61Router implements Runnable {
 	Map<Long, Socket> aidToSocket; // for forwarding, <destAgentId, Socket>
 	Map<Integer, RouterCircuit> responseRoutingTable; // multiplexing stream ids to circuits, <streamId, <startAgentId, startCircuit>>
 	Map<Integer, Socket> sidToWebServerSockets; // so we know which web server to deliver packets to once at endpoint of circuit
-
+	Map<Socket, BlockingQueue<Tor61Cell>> socketToQueue; // This will link an endpoint socket (to a browser or web server) to a queue
 	/*
 	 * 
 	 */
@@ -46,6 +48,7 @@ public class Tor61Router implements Runnable {
 		this.aidToSocket = new HashMap<Long, Socket>();
 		this.responseRoutingTable = new HashMap<Integer, RouterCircuit>();
 		this.sidToWebServerSockets = new HashMap<Integer, Socket>();
+		this.socketToQueue = new HashMap<Socket, BlockingQueue<Tor61Cell>>();
 	}
 
 	/*
@@ -407,6 +410,38 @@ public class Tor61Router implements Runnable {
 
 		}*/
 	}
+	
+	/*
+	 * 
+	 */
+	public void addNewQueueForSocket(Socket socket) {
+		socketToQueue.put(socket, new LinkedBlockingQueue<Tor61Cell>());
+	}
+	
+	/*
+	 * 
+	 */
+	public void writeCellToQueueForSocket(Socket socket, Tor61Cell cell) {
+		try {
+			socketToQueue.get(socket).put(cell);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	/*
+	 * 
+	 */
+	public Tor61Cell takeFromQueue(Socket socket) {
+		Tor61Cell cell = null;
+		try {
+			cell = socketToQueue.get(socket).take(); // this call will block until queue isnt empty
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+			return null;
+		} 
+		return cell;
+	}
 
 	/*
 	 * 
@@ -568,6 +603,13 @@ public class Tor61Router implements Runnable {
 								// Open tcp connection with web server
 								Socket webServerSocket = new Socket(serverAddrString[0], Integer.parseInt(serverAddrString[1]));
 								sidToWebServerSockets.put(streamId, webServerSocket);
+								
+								// add a new blocking queue associated with this socket to the router side so it can write to the queue
+								// cells that it wants to forward to this socket
+								addNewQueueForSocket(webServerSocket);
+								
+								// Start a writer thread that will constantly read from a blocking queue and write to the socket
+								makeWriter(webServerSocket);
 
 								// Successfully established tcp connection with web server
 								// add an entry to the response routing table that would allow us to send a response back to the node who
@@ -598,5 +640,46 @@ public class Tor61Router implements Runnable {
 				//System.exit(1);
 			}
 		}
+	}
+	
+	/**
+	 * This will read from a blocking queue that is associated with the given socket (in router side), and write to the given socket.
+	 */
+	class Writer implements Runnable {
+		Socket socket;
+		
+		public Writer(Socket client) {
+			this.socket = client;
+		}
+
+		@Override
+		public void run() {
+			while (true) {
+				Tor61Cell cell = takeFromQueue(this.socket); // this call will block until an element is returned
+				
+				if (cell != null) { // if the wait for a non emtpy queue was interrupted
+					// extra the byte array message and forward it to the socket
+					byte[] message = cell.data;
+					OutputStream outputStream =  null;
+					try {
+						outputStream = this.socket.getOutputStream();
+						outputStream.write(message);
+						outputStream.flush();
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
+			}
+		}
+	}
+	
+	/*
+	 * 
+	 */
+	public void makeWriter(Socket socket) {
+		Writer w = new Writer(socket);
+		Thread t2 = new Thread(w);
+		t2.start();
 	}
 }

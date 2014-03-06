@@ -10,6 +10,7 @@ import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.BlockingQueue;
 
 /**
  * Joseph Shieh, 1031718, josephs2@uw.edu
@@ -43,15 +44,66 @@ public class HttpProxy implements Runnable {
 		while (true) { // Listen forever, terminated by Ctrl-C
 			try {
 				Socket client = proxyServerSocket.accept();
+				
+				// add a new blocking queue associated with this socket to the router side so it can write to the queue
+				// cells that it wants to forward to this socket
+				router.addNewQueueForSocket(client);
+				
 				// Now that we have a client to to communicate with, create new thread
 				Listen l = new Listen(client);
 				Thread t = new Thread(l);
 				t.start();
+				
+				// Start a writer thread that will constantly read from a blocking queue and write to the socket
+				/*Writer w = new Writer(client);
+				Thread t2 = new Thread(w);
+				t2.start();*/
+				router.makeWriter(client);
+				
 			} catch (IOException e) {
 				System.out.println("Failed to accept connection.");
 			}
 		}
 	}
+	
+	/*
+	 * 
+	 */
+	public 
+	
+	/**
+	 * This will read from a blocking queue that is associated with the given socket (in router side), and write to the given socket.
+	 */
+	/*
+	class Writer implements Runnable {
+		Socket socket;
+		
+		public Writer(Socket client) {
+			this.socket = client;
+		}
+
+		@Override
+		public void run() {
+			while (true) {
+				Tor61Cell cell = router.takeFromQueue(this.socket); // this call will block until an element is returned
+				
+				if (cell != null) { // if the wait for a non emtpy queue was interrupted
+					// extra the byte array message and forward it to the socket
+					byte[] message = cell.data;
+					OutputStream outputStream =  null;
+					try {
+						outputStream = this.socket.getOutputStream();
+						outputStream.write(message);
+						outputStream.flush();
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
+			}
+		}
+	}*/
+	
 
 	/**
 	 * This is for listening to a specific client's request, and create a new thread to redirect the request
