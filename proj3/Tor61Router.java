@@ -390,9 +390,10 @@ public class Tor61Router implements Runnable {
 		m[14 + destAddrLen] = '\0';
 		byte[] agentIdBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
 				.putLong(agentId).array();
-		for (int i = 0; i < 4; i ++) {
-			m[14 + destAddrLen + 1 + i] = agentIdBytes[4 + i]; // Service data
-		}
+		m[14 + destAddrLen + 1] = agentIdBytes[4];
+		m[14 + destAddrLen + 2] = agentIdBytes[5];
+		m[14 + destAddrLen + 3] = agentIdBytes[6];
+		m[14 + destAddrLen + 4] = agentIdBytes[7];
 		System.out.println("relay extend");
 		System.out.println("ip: " + destNode.address.toString().substring(1));
 		System.out.println("port: " + destNode.port);
@@ -630,6 +631,7 @@ public class Tor61Router implements Runnable {
 						if (serviceData == (int) opened && !torSockets.containsKey(info)) {
 							torSockets.put(info, src);
 							socketToAid.put(src, opener);
+							aidToSocket.put(opener, src);
 						} else {
 							// Received this message even though wrong address
 							System.out.println(nodeName + " Received incorrect message. {circId: " + circId +", type: " + type + "}");
@@ -715,17 +717,27 @@ public class Tor61Router implements Runnable {
 							} else if (relayCmd == 6) {
 								System.out.println(nodeName + " Received message: RELAY EXTEND");
 								String body = "";
-								for (int i = 0; i < bodyLength; i ++) {
-									body += (char) buffer[14 + i];
+								int count = 0;
+								char c;
+								int indexOfNull = -1;
+								while (count < bodyLength) {
+									if ((c = (char)buffer[14 + count]) != '\0') {
+										body += c;
+										System.out.println(body);
+									} else {
+										System.out.println("WTF");
+										indexOfNull = count;
+									}
+									count ++;
 								}
 								System.out.println("body:" + body);
-								String[] bodyStrings = body.split("\0");
-								System.out.println(bodyStrings.length);
-								String destAddr = bodyStrings[0].split(":")[0];
-								int destPort = Integer.parseInt(bodyStrings[0].split(":")[1]);
+								System.out.println(indexOfNull);
+								String destAddr = body.substring(0, indexOfNull).split(":")[0];
+								int destPort = Integer.parseInt(body.substring(0, indexOfNull).split(":")[1]);
 								System.out.println(destAddr);
 								System.out.println(destPort);
-								long destAid = Long.parseLong(bodyStrings[1]);
+								long destAid = Long.parseLong(body.substring(indexOfNull));
+								System.out.println("destAid:" + destAid);
 								// Once we get relay extend at end point, connect with new node
 								connect(new Tor61NodeInfo(InetAddress.getByName(destAddr), destPort, Long.toString(destAid)),
 										Long.toString(this.serviceData), source);

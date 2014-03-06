@@ -74,10 +74,27 @@ public class Tor61Node {
 			}
 			// Create second hop
 			routerInfos.remove(hop1); // so we can't connect to same node twice
-			int hop2 = r.nextInt(routerInfos.size());
-			System.out.println("size:" + routerInfos.size() + ",index2:" + hop2);
-			Tor61NodeInfo node2 = routerInfos.get(hop2);
-			router.relayExtend(node2);
+			if (routerInfos.size() < 1) {
+				System.out.println("We form a circuit of length 3 with unique nodes.");
+				System.out.println("Circuit not created.");
+			} else {
+				int hop2 = r.nextInt(routerInfos.size());
+				System.out.println("size:" + routerInfos.size() + ",index2:" + hop2);
+				Tor61NodeInfo node2 = routerInfos.get(hop2);
+				router.relayExtend(node2);
+
+				routerInfos.remove(hop2);
+				if (routerInfos.size() < 1) {
+					System.out.println("We form a circuit of length 3 with unique nodes.");
+					System.out.println("Circuit not created.");
+				} else {
+					int hop3 = r.nextInt(routerInfos.size());
+					System.out.println("size:" + routerInfos.size() + ",index3:" + hop3);
+					Tor61NodeInfo node3 = routerInfos.get(hop3);
+					router.relayExtend(node3);
+				}
+
+			}
 		}
 	}
 }
