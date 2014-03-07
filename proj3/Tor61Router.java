@@ -193,16 +193,16 @@ public class Tor61Router implements Runnable {
 				} else if (type == 2) { // Created
 					System.out.println(nodeName + " Received response: CREATED");
 					///////////////////////////////////////////////// extract other agent id and circuit id
-					RouterCircuit destRC = new RouterCircuit(Long.parseLong(destNode.serviceData), circId);
+					dest = new RouterCircuit(Long.parseLong(destNode.serviceData), circId);
 					if (src != null) {
 						// If there is a source, that means this is generated from a relay cell,
 						// therefore we need to send back a relay extended cell
-						routingTable.addRoute(src, destRC);
-						routingTable.addRoute(destRC, src);
+						routingTable.addRoute(src, dest);
+						routingTable.addRoute(dest, src);
 						relayExtended(src);
 					} else { // This is a start point because we were not relay extending
-						routingTable.addRoute(new RouterCircuit(-1, -1), destRC);
-						routingTable.addRoute(destRC, new RouterCircuit(-1, -1));
+						routingTable.addRoute(new RouterCircuit(-1, -1), dest);
+						routingTable.addRoute(dest, new RouterCircuit(-1, -1));
 					}
 
 				} else if (type == 3) { // Relay
@@ -221,6 +221,23 @@ public class Tor61Router implements Runnable {
 						// Start sending relay data cells
 					} else if (relayCmd == 7) {
 						System.out.println(nodeName + " Received: RELAY EXTENDED");
+						// If were not start point, forward towards the start point
+						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
+						dest = routingTable.getDest(from);
+						if (dest != new RouterCircuit(-1, -1)) { // forward this cell back
+							System.out.println("Forwarding from...");
+							System.out.println("Source: {agentId: " + from.agentId + ", circId: " + from.circuitId + "}");
+							System.out.println("Dest: {agentId: " + dest.agentId + ", circId: " + dest.circuitId + "}");
+							Socket forward = aidToSocket.get(dest.agentId);
+							int destCircId = dest.circuitId;
+							byte[] destCircIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+									.putInt(destCircId).array();
+							buffer[0] = destCircIdBytes[2]; // circuit id
+							buffer[1] = destCircIdBytes[3];
+							OutputStream forwardOutputStream = forward.getOutputStream();
+							forwardOutputStream.write(buffer);
+							forwardOutputStream.flush();
+						}
 					} else if (relayCmd == 11) {
 						System.out.println(nodeName + " Received: RELAY BEGIN FAILED");
 					} else if (relayCmd == 12) {
