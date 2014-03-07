@@ -656,6 +656,7 @@ public class Tor61Router implements Runnable {
 						for (int i = 3; i < TOR_CELL_LENGTH; i ++) {
 							m[i] = buffer[i];
 						}
+						System.out.println(nodeName + " Sending message: CREATED");
 					} else if (type == 4) { // Destroy
 
 					} else if (type == 3) { // Relay
@@ -670,7 +671,10 @@ public class Tor61Router implements Runnable {
 						}
 						RouterCircuit source = new RouterCircuit(agentId, circId);
 						RouterCircuit dest = routingTable.getDest(source);
-						if (dest != null) { // If this isn't the end point, just forward it
+						if (dest.agentId != -1 && dest.circuitId != -1) { // If this isn't the end point, just forward it
+							System.out.println("Forwarding from...");
+							System.out.println("Source: {agentId: " + source.agentId + ", circId: " + source.circuitId + "}");
+							System.out.println("Dest: {agentId: " + dest.agentId + ", circId: " + dest.circuitId + "}");
 							Socket forward = aidToSocket.get(dest.agentId);
 							int destCircId = dest.circuitId;
 							byte[] destCircIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)

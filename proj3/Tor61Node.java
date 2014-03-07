@@ -50,6 +50,25 @@ public class Tor61Node {
 		// Fetch all nodes that are ours
 		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + String.format("%04d", groupNum));
 
+		/*
+		Random r = new Random();
+		// Create first hop
+		int hop1 = r.nextInt(routerInfos.size());
+		Tor61NodeInfo node1 = routerInfos.get(hop1);
+		System.out.println("size:" + routerInfos.size() + ",index1:" + hop1);
+		router.connect(node1, Long.toString(serviceData), null);
+		try {
+			Thread.sleep(5000);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+		// Create second hop
+		int hop2 = r.nextInt(routerInfos.size());
+		System.out.println("size:" + routerInfos.size() + ",index2:" + hop2);
+		Tor61NodeInfo node2 = routerInfos.get(hop2);
+		router.relayExtend(node2);
+		 */
+
 		// Remove our own node from the fetched list
 		for (int i = 0; i < routerInfos.size(); i++) {
 			Tor61NodeInfo item = routerInfos.get(i);
