@@ -1,4 +1,6 @@
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -7,6 +9,8 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -17,6 +21,8 @@ import java.util.concurrent.BlockingQueue;
  * Sergey Naumets, 1025573, snaumets@uw.edu
  */
 public class HttpProxy implements Runnable {
+	public static final int TOR_CELL_LENGTH = 512;
+	
 	ServerSocket proxyServerSocket;
 	int port;
 	Tor61Router router;
@@ -65,45 +71,6 @@ public class HttpProxy implements Runnable {
 			}
 		}
 	}
-	
-	/*
-	 * 
-	 */
-	public 
-	
-	/**
-	 * This will read from a blocking queue that is associated with the given socket (in router side), and write to the given socket.
-	 */
-	/*
-	class Writer implements Runnable {
-		Socket socket;
-		
-		public Writer(Socket client) {
-			this.socket = client;
-		}
-
-		@Override
-		public void run() {
-			while (true) {
-				Tor61Cell cell = router.takeFromQueue(this.socket); // this call will block until an element is returned
-				
-				if (cell != null) { // if the wait for a non emtpy queue was interrupted
-					// extra the byte array message and forward it to the socket
-					byte[] message = cell.data;
-					OutputStream outputStream =  null;
-					try {
-						outputStream = this.socket.getOutputStream();
-						outputStream.write(message);
-						outputStream.flush();
-					} catch (IOException e) {
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-					}
-				}
-			}
-		}
-	}*/
-	
 
 	/**
 	 * This is for listening to a specific client's request, and create a new thread to redirect the request
@@ -119,12 +86,13 @@ public class HttpProxy implements Runnable {
 		@Override
 		public void run() {
 			try{
-				OutputStream outputStream = socket.getOutputStream();
+				//OutputStream outputStream = socket.getOutputStream();
 				BufferedReader inputStream = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 				String inputLine, outputLine = "";
 				boolean first = true;
 				String temp, hostAddr = "";
 				int port = 80;
+				int streamId = -1;
 				while ((inputLine = inputStream.readLine()) != null) {
 					if (first){
 						// Print the first line of the request
@@ -144,7 +112,7 @@ public class HttpProxy implements Runnable {
 						outputLine += inputLine + EOF;
 
 						Random r = new Random();
-						int streamId = r.nextInt(65536);
+						streamId = r.nextInt(65536);
 						while (sidToClient.containsKey(streamId)){
 							streamId = r.nextInt(65536);
 						}
@@ -160,6 +128,27 @@ public class HttpProxy implements Runnable {
 						// End of request's HTTP header
 						outputLine += EOF;
 						InetAddress destAddr = InetAddress.getByName(hostAddr);
+						// Convert entire request to relay data cells and send them towards web server
+						byte[] cellBody = new byte[TOR_CELL_LENGTH - 14]; // take away the space for relay message headers
+						InputStream requestStream = null;
+						DataInputStream dis = null;
+						requestStream = new ByteArrayInputStream(outputLine.getBytes());;
+						dis = new DataInputStream(requestStream);
+						while (dis.available() >= (TOR_CELL_LENGTH - 14)) { // if anything is available, its guaranteed to be 512 bytes
+							//try {
+							dis.readFully(cellBody);
+							//} catch (EOFException e) { // When other node closes
+							//System.out.println("Caught eof exception");
+							//continue;
+							//}
+							router.relayDataCell(streamId, cellBody, TOR_CELL_LENGTH - 14);
+						}
+						// read the remainder of the requestStream
+						int count = requestStream.available(); // count the available bytes form the input stream
+						byte[] cellEnd = new byte[count];
+						dis.read(cellEnd);
+				        router.relayDataCell(streamId, cellEnd, count);
+
 						//SendAndReceive s = new SendAndReceive(destAddr, port, outputLine);
 						//Thread t = new Thread(s);
 						//t.start();
