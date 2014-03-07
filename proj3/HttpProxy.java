@@ -8,8 +8,6 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Random;
 
 /**
@@ -22,14 +20,10 @@ public class HttpProxy implements Runnable {
 	ServerSocket proxyServerSocket;
 	int port;
 	Tor61Router router;
-	Map<Integer, Socket> sidToServer;
-	Map<Integer, Socket> sidToClient;
 
 	public HttpProxy(int port, Tor61Router router) {
 		this.port = port;
 		this.router = router;
-		sidToServer = new HashMap<Integer, Socket>();
-		sidToClient = new HashMap<Integer, Socket>();
 	}
 
 	@Override
@@ -52,7 +46,7 @@ public class HttpProxy implements Runnable {
 				router.addNewQueueForSocket(client);
 
 				// Now that we have a client to to communicate with, create new thread
-				Listen l = new Listen(client);
+				ClientListener l = new ClientListener(client);
 				Thread t = new Thread(l);
 				t.start();
 
@@ -72,10 +66,10 @@ public class HttpProxy implements Runnable {
 	 * This is for listening to a specific client's request, and create a new thread to redirect the request
 	 * to the web server.
 	 */
-	class Listen implements Runnable {
+	class ClientListener implements Runnable {
 		Socket socket;
 		public static final String EOF = "\r\n"; // CR LF String
-		public Listen(Socket client) {
+		public ClientListener(Socket client) {
 			this.socket = client;
 		}
 
@@ -109,10 +103,10 @@ public class HttpProxy implements Runnable {
 
 						Random r = new Random();
 						streamId = r.nextInt(65536);
-						while (sidToClient.containsKey(streamId)){
+						while (router.sidToClientSocketContainsKey(streamId)){
 							streamId = r.nextInt(65536);
 						}
-						sidToClient.put(streamId, socket);
+						router.addSidToClientSocket(streamId, socket);
 						// Send a relay begin cell
 						router.relayBegin(streamId, hostAddr + ":" + port);
 						try {

@@ -30,7 +30,9 @@ public class Tor61Router implements Runnable {
 	Map<Socket, Long> socketToAid; // for getting agent id of sender => look up in routing table, <Socket, srcAgentId>
 	Map<Long, Socket> aidToSocket; // for forwarding, <destAgentId, Socket>
 	Map<Integer, RouterCircuit> responseRoutingTable; // multiplexing stream ids to circuits, <streamId, <startAgentId, startCircuit>>
-	Map<Integer, Socket> sidToWebServerSockets; // so we know which web server to deliver packets to once at endpoint of circuit
+	Map<Integer, Socket> sidToServerSocket; // so we know which web server to deliver packets to once at endpoint of circuit
+	Map<Integer, Socket> sidToClientSocket;
+	Map<Socket, Integer> webServerSocketToSid;
 	Map<Socket, BlockingQueue<Tor61Cell>> socketToQueue; // This will link an endpoint socket (to a browser or web server) to a queue
 	/*
 	 * 
@@ -43,7 +45,9 @@ public class Tor61Router implements Runnable {
 		this.socketToAid = new HashMap<Socket, Long>();
 		this.aidToSocket = new HashMap<Long, Socket>();
 		this.responseRoutingTable = new HashMap<Integer, RouterCircuit>();
-		this.sidToWebServerSockets = new HashMap<Integer, Socket>();
+		this.sidToServerSocket = new HashMap<Integer, Socket>();
+		this.sidToClientSocket = new HashMap<Integer, Socket>();
+		this.webServerSocketToSid = new HashMap<Socket, Integer>();
 		this.socketToQueue = new HashMap<Socket, BlockingQueue<Tor61Cell>>();
 	}
 
@@ -218,28 +222,13 @@ public class Tor61Router implements Runnable {
 					}
 					int relayCmd = buffer[13];
 					if (relayCmd == 2) {
-						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
-						dest = routingTable.getDest(from);
-						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
-							relayForward(from, dest, buffer);
-						}
+						System.out.println(nodeName + " Received: RELAY DATA");
+					} else if (relayCmd == 3) {
+						System.out.println(nodeName + " Received: RELAY END");
 					} else if (relayCmd == 4) { // Connected
 						System.out.println(nodeName + " Received: RELAY CONNECTED");
-						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
-						dest = routingTable.getDest(from);
-						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
-							relayForward(from, dest, buffer);
-						}
 					} else if (relayCmd == 7) {
 						System.out.println(nodeName + " Received: RELAY EXTENDED");
-						// If were not start point, forward towards the start point
-						System.out.println("socket isClosed: " + send.isClosed());
-						System.out.println("socketToAid contains:" + socketToAid.containsKey(send));
-						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
-						dest = routingTable.getDest(from);
-						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
-							relayForward(from, dest, buffer);
-						}
 					} else if (relayCmd == 11) {
 						System.out.println(nodeName + " Received: RELAY BEGIN FAILED");
 					} else if (relayCmd == 12) {
@@ -247,6 +236,25 @@ public class Tor61Router implements Runnable {
 					} else {
 						System.out.println(nodeName + " Error: Sender class received requests.");
 					}
+					if (relayCmd == 2 || relayCmd == 3 || relayCmd == 4 || relayCmd == 7 || relayCmd == 11 || relayCmd == 12) {
+						// if valid relay cells
+						// If were not start point, forward towards the start point
+						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
+						dest = routingTable.getDest(from);
+						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
+							relayForward(from, dest, buffer);
+						} else if (relayCmd == 2) {
+							Tor61Cell cell = new Tor61Cell(buffer);
+							writeCellToQueueForSocket(sidToClientSocket.get(streamId), cell);
+						} else if (relayCmd == 3) {
+							Socket client = sidToClientSocket.get(streamId);
+							if (client != null && !client.isClosed()) {
+								client.close();
+							}
+							removeSidToClientSocket(streamId);
+						}
+					}
+
 				} else {
 					System.out.println(nodeName + " Incorrect message received. {circId: " + circId +", type: " + type + "}");
 				}
@@ -501,6 +509,36 @@ public class Tor61Router implements Runnable {
 		}
 	}
 
+	public void relayEnd(int streamId) {
+		RouterCircuit start = responseRoutingTable.get(streamId);
+		byte[] m = new byte[TOR_CELL_LENGTH];
+		byte[] circIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(start.circuitId).array();
+		m[0] = circIdBytes[2]; // circuit id
+		m[1] = circIdBytes[3];
+		m[2] = (byte) 0x03; // RELAY
+		m[3] = 0; // END - stream id = 0
+		m[4] = 0;
+		for (int i = 5; i < 11; i ++) { // zeroing out zero field and digest field
+			m[i] = 0;
+		}
+		m[11] = 0; // body length
+		m[12] = 0;
+		m[13] = (byte) 0x03; // END
+		Arrays.fill(m, 14, 512, (byte) 0);
+		try {
+			OutputStream outputStream = aidToSocket.get(start.agentId).getOutputStream();
+			outputStream.write(m);
+			outputStream.flush();
+			String serviceNameHex = Long.toString(this.serviceData, 16);
+			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
+			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
+			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
+			System.out.println(nodeName + " Sending message: RELAY END");
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
 	/*
 	 * 
 	 */
@@ -663,7 +701,7 @@ public class Tor61Router implements Runnable {
 					client.setKeepAlive(true);
 					//client.setSoTimeout(30000); // Set longer timeout for now
 					// Now that we have a client to to communicate with, create new thread
-					Listen l = new Listen(client, this.serviceData);
+					TorListener l = new TorListener(client, this.serviceData);
 					Thread t = new Thread(l);
 					t.start();
 				} catch (IOException e) {
@@ -682,15 +720,26 @@ public class Tor61Router implements Runnable {
 
 	}
 
+	public boolean sidToClientSocketContainsKey(int streamId) {
+		return sidToClientSocket.containsKey(streamId);
+	}
+	public void addSidToClientSocket(int streamId, Socket client) {
+		sidToClientSocket.put(streamId, client);
+	}
+
+	public void removeSidToClientSocket(int streamId) {
+		sidToClientSocket.remove(streamId);
+	}
+
 	/**
 	 * This is for listening to a specific client's request, and create a new thread to redirect the request
 	 * to the web server.
 	 */
-	class Listen implements Runnable {
+	class TorListener implements Runnable {
 		Socket src;
 		long serviceData; // will allow us to print the name of the router who prints messages
-		public static final String EOF = "\r\n"; // CR LF String
-		public Listen(Socket client, long serviceData) {
+
+		public TorListener(Socket client, long serviceData) {
 			this.src = client;
 			this.serviceData = serviceData;
 		}
@@ -798,7 +847,8 @@ public class Tor61Router implements Runnable {
 								String[] serverAddrString = serverAddr.split(":");
 								// Open tcp connection with web server
 								Socket webServerSocket = new Socket(serverAddrString[0], Integer.parseInt(serverAddrString[1]));
-								sidToWebServerSockets.put(streamId, webServerSocket);
+								sidToServerSocket.put(streamId, webServerSocket);
+								webServerSocketToSid.put(webServerSocket, streamId);
 
 								// add a new blocking queue associated with this socket to the router side so it can write to the queue
 								// cells that it wants to forward to this socket
@@ -811,13 +861,12 @@ public class Tor61Router implements Runnable {
 								// add an entry to the response routing table that would allow us to send a response back to the node who
 								// sent this relay message via the same circuit
 								responseRoutingTable.put(streamId, new RouterCircuit(agentId, circId));
-								System.out.println("After receiving relay begin, socket isClosed:" + src.isClosed());
 								// Send back "Connected" response
 								connected(streamId, circId, src);
 							} else if (relayCmd == 2) { // DATA CELL
 								System.out.println(nodeName + " Received message: RELAY DATA CELL");
 								Tor61Cell cell = new Tor61Cell(buffer);
-								writeCellToQueueForSocket(sidToWebServerSockets.get(streamId), cell);
+								writeCellToQueueForSocket(sidToServerSocket.get(streamId), cell);
 							} else if (relayCmd == 3) {
 
 							} else if (relayCmd == 6) {
@@ -916,5 +965,50 @@ public class Tor61Router implements Runnable {
 		Writer w = new Writer(socket);
 		Thread t2 = new Thread(w);
 		t2.start();
+	}
+
+	class ServerListener implements Runnable {
+		Socket server;
+		public ServerListener(Socket server) {
+			this.server = server;
+		}
+
+		@Override
+		public void run() {
+			InputStream inputStream = null;
+			try{
+				int streamId = webServerSocketToSid.get(server);
+				// Convert entire request to relay data cells and send them towards web server
+				byte[] cellBody = new byte[TOR_CELL_LENGTH - 14]; // take away the space for relay message headers
+				inputStream = server.getInputStream();
+				int len = 0;
+				while ((len = inputStream.read(cellBody, 0, TOR_CELL_LENGTH - 14)) >= 0) { // len = -1 if done
+					System.out.println("Response len: " + len);
+					relayDataCell(streamId, cellBody, len);
+				}
+
+				// Send relay end since we're done with this response
+				relayEnd(streamId);
+
+				sidToServerSocket.remove(streamId);
+				webServerSocketToSid.remove(server);
+				responseRoutingTable.remove(streamId);
+				socketToQueue.remove(server);
+			} catch (IOException e) {
+				System.out.println("Failed to get socket.");
+				System.exit(1);
+			} finally {
+				try {
+					if (inputStream != null) {
+						inputStream.close();
+					}
+					if (server != null) {
+						server.close();
+					}
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
 	}
 }
