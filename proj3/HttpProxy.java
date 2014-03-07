@@ -127,6 +127,7 @@ public class HttpProxy implements Runnable {
 						DataInputStream dis = null;
 						requestStream = new ByteArrayInputStream(outputLine.getBytes());;
 						dis = new DataInputStream(requestStream);
+						RouterCircuit start = new RouterCircuit(-1, -1);
 						while (dis.available() >= (TOR_CELL_LENGTH - 14)) { // if anything is available, its guaranteed to be 512 bytes
 							//try {
 							dis.readFully(cellBody);
@@ -134,13 +135,13 @@ public class HttpProxy implements Runnable {
 							//System.out.println("Caught eof exception");
 							//continue;
 							//}
-							router.relayDataCell(streamId, cellBody, TOR_CELL_LENGTH - 14);
+							router.relayDataCell(start, streamId, cellBody, TOR_CELL_LENGTH - 14);
 						}
 						// read the remainder of the requestStream
 						int count = requestStream.available(); // count the available bytes form the input stream
 						byte[] cellEnd = new byte[count];
 						dis.read(cellEnd);
-						router.relayDataCell(streamId, cellEnd, count);
+						router.relayDataCell(start, streamId, cellEnd, count);
 
 						//SendAndReceive s = new SendAndReceive(destAddr, port, outputLine);
 						//Thread t = new Thread(s);

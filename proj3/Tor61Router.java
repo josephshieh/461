@@ -542,9 +542,9 @@ public class Tor61Router implements Runnable {
 	/*
 	 * 
 	 */
-	public void relayDataCell(int streamId, byte[] body, int bodyLen) {
+	public void relayDataCell(RouterCircuit from, int streamId, byte[] body, int bodyLen) {
 		byte[] m = new byte[TOR_CELL_LENGTH];
-		RouterCircuit dest = routingTable.getDest(new RouterCircuit(-1, -1)); // (-1, -1) is starting point
+		RouterCircuit dest = routingTable.getDest(from); // (-1, -1) is starting point
 		int circId = -1;
 		long agentId = -1;
 		if (dest != null) {
@@ -985,13 +985,14 @@ public class Tor61Router implements Runnable {
 			InputStream inputStream = null;
 			try{
 				int streamId = webServerSocketToSid.get(server);
+				RouterCircuit start = responseRoutingTable.get(streamId);
 				// Convert entire request to relay data cells and send them towards web server
 				byte[] cellBody = new byte[TOR_CELL_LENGTH - 14]; // take away the space for relay message headers
 				inputStream = server.getInputStream();
 				int len = 0;
 				while ((len = inputStream.read(cellBody, 0, TOR_CELL_LENGTH - 14)) >= 0) { // len = -1 if done
 					System.out.println("Response len: " + len);
-					relayDataCell(streamId, cellBody, len);
+					relayDataCell(start, streamId, cellBody, len);
 				}
 
 				// Send relay end since we're done with this response
