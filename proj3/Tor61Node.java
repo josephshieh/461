@@ -50,25 +50,6 @@ public class Tor61Node {
 		// Fetch all nodes that are ours
 		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + String.format("%04d", groupNum));
 
-		/*
-		Random r = new Random();
-		// Create first hop
-		int hop1 = r.nextInt(routerInfos.size());
-		Tor61NodeInfo node1 = routerInfos.get(hop1);
-		System.out.println("size:" + routerInfos.size() + ",index1:" + hop1);
-		router.connect(node1, Long.toString(serviceData), null);
-		try {
-			Thread.sleep(5000);
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		}
-		// Create second hop
-		int hop2 = r.nextInt(routerInfos.size());
-		System.out.println("size:" + routerInfos.size() + ",index2:" + hop2);
-		Tor61NodeInfo node2 = routerInfos.get(hop2);
-		router.relayExtend(node2);
-		 */
-
 		// Remove our own node from the fetched list
 		for (int i = 0; i < routerInfos.size(); i++) {
 			Tor61NodeInfo item = routerInfos.get(i);
@@ -76,7 +57,8 @@ public class Tor61Node {
 				routerInfos.remove(i);
 			}
 		}
-		if (routerInfos.size() < 1) {
+
+		if (routerInfos.size() < 3) {
 			System.out.println("We form a circuit of length 3 with unique nodes.");
 			System.out.println("Circuit not created.");
 		} else {
@@ -84,36 +66,28 @@ public class Tor61Node {
 			// Create first hop
 			int hop1 = r.nextInt(routerInfos.size());
 			Tor61NodeInfo node1 = routerInfos.get(hop1);
-			System.out.println("size:" + routerInfos.size() + ",index1:" + hop1);
+			System.out.println("hop1 dest:" + node1.serviceData);
 			router.connect(node1, Long.toString(serviceData), null);
+
 			try {
 				Thread.sleep(5000);
 			} catch (InterruptedException e) {
 				e.printStackTrace();
 			}
+
 			// Create second hop
 			routerInfos.remove(hop1); // so we can't connect to same node twice
-			if (routerInfos.size() < 1) {
-				System.out.println("We form a circuit of length 3 with unique nodes.");
-				System.out.println("Circuit not created.");
-			} else {
-				int hop2 = r.nextInt(routerInfos.size());
-				System.out.println("size:" + routerInfos.size() + ",index2:" + hop2);
-				Tor61NodeInfo node2 = routerInfos.get(hop2);
-				router.relayExtend(node2);
+			int hop2 = r.nextInt(routerInfos.size());
+			Tor61NodeInfo node2 = routerInfos.get(hop2);
+			System.out.println("hop2 dest:" + node2.serviceData);
+			router.relayExtend(node2);
 
-				// Create third hop
-				routerInfos.remove(hop2);
-				if (routerInfos.size() < 1) {
-					System.out.println("We form a circuit of length 3 with unique nodes.");
-					System.out.println("Circuit not created.");
-				} else {
-					int hop3 = r.nextInt(routerInfos.size());
-					System.out.println("size:" + routerInfos.size() + ",index3:" + hop3);
-					Tor61NodeInfo node3 = routerInfos.get(hop3);
-					router.relayExtend(node3);
-				}
-			}
+			// Create third hop
+			routerInfos.remove(hop2);
+			int hop3 = r.nextInt(routerInfos.size());
+			Tor61NodeInfo node3 = routerInfos.get(hop3);
+			System.out.println("hop3 dest:" + node3.serviceData);
+			router.relayExtend(node3);
 		}
 	}
 }

@@ -407,7 +407,7 @@ public class Tor61Router implements Runnable {
 			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
 			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
 			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
-			System.out.println(nodeName + " Sending message: RELAY EXTEND");
+			System.out.println(nodeName + " Sending message: RELAY EXTEND to " + agentId);
 			OutputStream outputStream = send.getOutputStream(); //send.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
@@ -671,7 +671,8 @@ public class Tor61Router implements Runnable {
 						}
 						RouterCircuit source = new RouterCircuit(agentId, circId);
 						RouterCircuit dest = routingTable.getDest(source);
-						if (dest.agentId != -1 && dest.circuitId != -1) { // If this isn't the end point, just forward it
+						if (dest != null) {
+							//if (dest.agentId != -1 && dest.circuitId != -1) { // If this isn't the end point, just forward it
 							System.out.println("Forwarding from...");
 							System.out.println("Source: {agentId: " + source.agentId + ", circId: " + source.circuitId + "}");
 							System.out.println("Dest: {agentId: " + dest.agentId + ", circId: " + dest.circuitId + "}");
@@ -722,7 +723,6 @@ public class Tor61Router implements Runnable {
 							} else if (relayCmd == 3) {
 
 							} else if (relayCmd == 6) {
-								System.out.println(nodeName + " Received message: RELAY EXTEND");
 								String body = "";
 								int count = 0;
 								char c;
@@ -731,7 +731,6 @@ public class Tor61Router implements Runnable {
 								while (count < bodyLength) {
 									if (((c = (char)buffer[14 + count]) != '\0') && indexOfNull == -1) { // body up to the '\0'
 										body += c;
-										System.out.println(body);
 									} else if (((c = (char)buffer[14 + count]) != '\0') && indexOfNull != -1) { // build up agent id after '\0'
 										for (int i = 0; i < 4; i++) {
 											destAid = (destAid << 8) + (buffer[i + 14 + count] & 0xff);
@@ -743,12 +742,9 @@ public class Tor61Router implements Runnable {
 									}
 									count ++;
 								}
-								System.out.println("body:" + body);
 								String destAddr = body.substring(0, indexOfNull).split(":")[0];
 								int destPort = Integer.parseInt(body.substring(0, indexOfNull).split(":")[1]);
-								System.out.println(destAddr);
-								System.out.println(destPort);
-								System.out.println("destAid:" + destAid);
+								System.out.println(nodeName + " Received message: RELAY EXTEND to" + destAid);
 								// Once we get relay extend at end point, connect with new node
 								connect(new Tor61NodeInfo(InetAddress.getByName(destAddr), destPort, Long.toString(destAid)),
 										Long.toString(this.serviceData), source);
