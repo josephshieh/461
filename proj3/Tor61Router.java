@@ -127,7 +127,7 @@ public class Tor61Router implements Runnable {
 	 */
 
 	/*
-	 * 
+	 * src - optional -> not null means we are creating because of a relay extend
 	 */
 	public void open(Socket send, Tor61NodeInfo destNode, String openerAid, RouterCircuit src) {
 		// Can only assign odd numbers to circuit id
@@ -193,12 +193,16 @@ public class Tor61Router implements Runnable {
 				} else if (type == 2) { // Created
 					System.out.println(nodeName + " Received response: CREATED");
 					///////////////////////////////////////////////// extract other agent id and circuit id
-					routingTable.addRoute(new RouterCircuit(-1, -1), dest);
-					routingTable.addRoute(dest, new RouterCircuit(-1, -1));
+					RouterCircuit destRC = new RouterCircuit(Long.parseLong(destNode.serviceData), circId);
 					if (src != null) {
 						// If there is a source, that means this is generated from a relay cell,
 						// therefore we need to send back a relay extended cell
+						routingTable.addRoute(src, destRC);
+						routingTable.addRoute(destRC, src);
 						relayExtended(src);
+					} else { // This is a start point because we were not relay extending
+						routingTable.addRoute(new RouterCircuit(-1, -1), destRC);
+						routingTable.addRoute(destRC, new RouterCircuit(-1, -1));
 					}
 
 				} else if (type == 3) { // Relay
@@ -657,6 +661,10 @@ public class Tor61Router implements Runnable {
 							m[i] = buffer[i];
 						}
 						System.out.println(nodeName + " Sending message: CREATED");
+						long openerAid = socketToAid.get(src);
+						// Storing route from src to (-1,-1) because we are at the end point
+						// We are not adding the reverse of this because we are definitely not the starting point of the circuit
+						routingTable.addRoute(new RouterCircuit(openerAid, circId), new RouterCircuit(-1,-1));
 					} else if (type == 4) { // Destroy
 
 					} else if (type == 3) { // Relay
@@ -671,7 +679,7 @@ public class Tor61Router implements Runnable {
 						}
 						RouterCircuit source = new RouterCircuit(agentId, circId);
 						RouterCircuit dest = routingTable.getDest(source);
-						if (dest != null) {
+						if (dest.agentId != -1 && dest.circuitId != -1) {
 							//if (dest.agentId != -1 && dest.circuitId != -1) { // If this isn't the end point, just forward it
 							System.out.println("Forwarding from...");
 							System.out.println("Source: {agentId: " + source.agentId + ", circId: " + source.circuitId + "}");

@@ -70,7 +70,7 @@ public class Tor61Node {
 			router.connect(node1, Long.toString(serviceData), null);
 
 			try {
-				Thread.sleep(5000);
+				Thread.sleep(3000);
 			} catch (InterruptedException e) {
 				e.printStackTrace();
 			}
@@ -82,6 +82,11 @@ public class Tor61Node {
 			System.out.println("hop2 dest:" + node2.serviceData);
 			router.relayExtend(node2);
 
+			try {
+				Thread.sleep(3000);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
 			// Create third hop
 			routerInfos.remove(hop2);
 			int hop3 = r.nextInt(routerInfos.size());

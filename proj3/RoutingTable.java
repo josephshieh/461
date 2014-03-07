@@ -9,9 +9,9 @@ public class RoutingTable {
 	}
 
 	public void addRoute(RouterCircuit start, RouterCircuit end){
-		if(!table.containsKey(start)) {
-			table.put(start, end);
-		}
+		// There might already be an entry from src to (-1,-1), we are overwriting regardless
+		// this happens when an endpoint extends the circuit
+		table.put(start, end);
 	}
 
 	public RouterCircuit getDest(RouterCircuit src) {
