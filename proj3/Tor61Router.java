@@ -166,7 +166,7 @@ public class Tor61Router implements Runnable {
 			// Read response from the "opened"
 			byte[] buffer = new byte[TOR_CELL_LENGTH];
 			dis = new DataInputStream(inputStream);
-			RouterCircuit dest = null; // so it is not reset every iteration
+			RouterCircuit dest = null; // so it is not declared every iteration
 			while (dis.available() >= 0) { // if anything is available, its guaranteed to be 512 bytes
 				//try {
 				dis.readFully(buffer);
@@ -188,7 +188,7 @@ public class Tor61Router implements Runnable {
 					System.out.println(nodeName + " Received response: OPENED");
 					socketToAid.put(send, Long.parseLong(destNode.serviceData));
 					aidToSocket.put(Long.parseLong(destNode.serviceData), send);
-					dest = create(send, destNode.serviceData);
+					create(send, destNode.serviceData);
 				} else if (type == 7) { // Open Failed
 					System.out.println(nodeName + " Open failed");
 				} else if (type == 2) { // Created
@@ -217,7 +217,13 @@ public class Tor61Router implements Runnable {
 						bodyLength = (bodyLength << 8) + (buffer[i] & 0xff);
 					}
 					int relayCmd = buffer[13];
-					if (relayCmd == 4) { // Connected
+					if (relayCmd == 2) {
+						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
+						dest = routingTable.getDest(from);
+						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
+							relayForward(from, dest, buffer);
+						}
+					} else if (relayCmd == 4) { // Connected
 						System.out.println(nodeName + " Received: RELAY CONNECTED");
 						// Start sending relay data cells
 					} else if (relayCmd == 7) {
@@ -228,18 +234,7 @@ public class Tor61Router implements Runnable {
 						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
 						dest = routingTable.getDest(from);
 						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
-							System.out.println("Forwarding from...");
-							System.out.println("Source: {agentId: " + from.agentId + ", circId: " + from.circuitId + "}");
-							System.out.println("Dest: {agentId: " + dest.agentId + ", circId: " + dest.circuitId + "}");
-							Socket forward = aidToSocket.get(dest.agentId);
-							int destCircId = dest.circuitId;
-							byte[] destCircIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
-									.putInt(destCircId).array();
-							buffer[0] = destCircIdBytes[2]; // circuit id
-							buffer[1] = destCircIdBytes[3];
-							OutputStream forwardOutputStream = forward.getOutputStream();
-							forwardOutputStream.write(buffer);
-							forwardOutputStream.flush();
+							relayForward(from, dest, buffer);
 						}
 					} else if (relayCmd == 11) {
 						System.out.println(nodeName + " Received: RELAY BEGIN FAILED");
@@ -275,7 +270,7 @@ public class Tor61Router implements Runnable {
 	/*
 	 * 
 	 */
-	public RouterCircuit create(Socket send, String openerAid) {
+	public void create(Socket send, String openerAid) {
 		// Send "create" message
 		long agentId = Long.parseLong(openerAid);
 		Random r = new Random();
@@ -319,9 +314,35 @@ public class Tor61Router implements Runnable {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		return new RouterCircuit(agentId, circId);
 	}
 
+
+	/**
+	 * Forwards this relay cell on the circuit to the next node
+	 * @param from - Where we are getting the data cell from
+	 * @param to - Where we are sending the data cell to
+	 * @param buffer - the relay cell
+	 */
+	public void relayForward(RouterCircuit from, RouterCircuit to, byte[] buffer) {
+		System.out.println("Forwarding from...");
+		System.out.println("Source: {agentId: " + from.agentId + ", circId: " + from.circuitId + "}");
+		System.out.println("Dest: {agentId: " + to.agentId + ", circId: " + to.circuitId + "}");
+		Socket forward = aidToSocket.get(to.agentId);
+		int destCircId = to.circuitId;
+		byte[] destCircIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
+				.putInt(destCircId).array();
+		buffer[0] = destCircIdBytes[2]; // circuit id
+		buffer[1] = destCircIdBytes[3];
+		OutputStream forwardOutputStream;
+		try {
+			forwardOutputStream = forward.getOutputStream();
+			forwardOutputStream.write(buffer);
+			forwardOutputStream.flush();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+	}
 
 	/*
 	 * 
@@ -699,20 +720,8 @@ public class Tor61Router implements Runnable {
 						}
 						RouterCircuit source = new RouterCircuit(agentId, circId);
 						RouterCircuit dest = routingTable.getDest(source);
-						if (dest.agentId != -1 && dest.circuitId != -1) {
-							//if (dest.agentId != -1 && dest.circuitId != -1) { // If this isn't the end point, just forward it
-							System.out.println("Forwarding from...");
-							System.out.println("Source: {agentId: " + source.agentId + ", circId: " + source.circuitId + "}");
-							System.out.println("Dest: {agentId: " + dest.agentId + ", circId: " + dest.circuitId + "}");
-							Socket forward = aidToSocket.get(dest.agentId);
-							int destCircId = dest.circuitId;
-							byte[] destCircIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
-									.putInt(destCircId).array();
-							buffer[0] = destCircIdBytes[2]; // circuit id
-							buffer[1] = destCircIdBytes[3];
-							OutputStream forwardOutputStream = forward.getOutputStream();
-							forwardOutputStream.write(buffer);
-							forwardOutputStream.flush();
+						if (!dest.equals(new RouterCircuit(-1, -1))) {
+							relayForward(source, dest, buffer);
 						} else { // at the end point
 							int bodyLength = 0;
 							for (int i = 11; i < 13; i++) {
