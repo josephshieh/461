@@ -857,6 +857,7 @@ public class Tor61Router implements Runnable {
 								// Start a writer thread that will constantly read from a blocking queue and write to the socket
 								makeWriter(webServerSocket);
 
+								makeServerListener(webServerSocket);
 								// Successfully established tcp connection with web server
 								// add an entry to the response routing table that would allow us to send a response back to the node who
 								// sent this relay message via the same circuit
@@ -963,8 +964,14 @@ public class Tor61Router implements Runnable {
 	 */
 	public void makeWriter(Socket socket) {
 		Writer w = new Writer(socket);
-		Thread t2 = new Thread(w);
-		t2.start();
+		Thread t = new Thread(w);
+		t.start();
+	}
+
+	public void makeServerListener(Socket socket) {
+		ServerListener sl = new ServerListener(socket);
+		Thread t = new Thread(sl);
+		t.start();
 	}
 
 	class ServerListener implements Runnable {

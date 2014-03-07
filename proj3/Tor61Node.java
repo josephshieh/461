@@ -93,6 +93,8 @@ public class Tor61Node {
 			Tor61NodeInfo node3 = routerInfos.get(hop3);
 			System.out.println("hop3 dest:" + node3.serviceData);
 			router.relayExtend(node3);
+
+			System.out.println("Proxy is ready to accept client connections");
 		}
 	}
 }
