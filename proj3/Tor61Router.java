@@ -225,7 +225,11 @@ public class Tor61Router implements Runnable {
 						}
 					} else if (relayCmd == 4) { // Connected
 						System.out.println(nodeName + " Received: RELAY CONNECTED");
-						// Start sending relay data cells
+						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
+						dest = routingTable.getDest(from);
+						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
+							relayForward(from, dest, buffer);
+						}
 					} else if (relayCmd == 7) {
 						System.out.println(nodeName + " Received: RELAY EXTENDED");
 						// If were not start point, forward towards the start point
@@ -496,7 +500,7 @@ public class Tor61Router implements Runnable {
 			e.printStackTrace();
 		}
 	}
-	
+
 	/*
 	 * 
 	 */
@@ -528,7 +532,7 @@ public class Tor61Router implements Runnable {
 		m[12] = bodyLengthBytes[3];
 		m[13] = (byte) 0x02; // DATA
 		for (int i = 0; i < bodyLen; i ++) {
-			m[i + 14] = (byte) body[i];
+			m[i + 14] = body[i];
 		}
 		int endBody = 14 + bodyLen;
 		if ((endBody < TOR_CELL_LENGTH)) { // only pad bytes if any empty space is left after the body
@@ -775,7 +779,7 @@ public class Tor61Router implements Runnable {
 						}
 						RouterCircuit source = new RouterCircuit(agentId, circId);
 						RouterCircuit dest = routingTable.getDest(source);
-						if (!dest.equals(new RouterCircuit(-1, -1))) {
+						if (!dest.equals(new RouterCircuit(-1, -1))) { // non end points will forward
 							relayForward(source, dest, buffer);
 						} else { // at the end point
 							int bodyLength = 0;
@@ -878,19 +882,19 @@ public class Tor61Router implements Runnable {
 				if (cell != null) { // if the wait for a non emtpy queue was interrupted
 					// extra the byte array message and forward it to the socket
 					byte[] message = cell.data;
-					
+
 					// Extract body(http request string) and put write to socket
 					int bodyLength = 0;
 					for (int i = 11; i < 13; i++) {
 						bodyLength = (bodyLength << 8) + (message[i] & 0xff);
 					}
-					
+
 					byte[] body = new byte[bodyLength];
-					
+
 					for (int i = 0; i < bodyLength; i++) { // copy body of message into body array
 						body[i] = message[i + 14];
 					}
-					
+
 					OutputStream outputStream =  null;
 					try {
 						outputStream = this.socket.getOutputStream();

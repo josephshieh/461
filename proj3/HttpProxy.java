@@ -4,17 +4,13 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
-import java.util.concurrent.BlockingQueue;
 
 /**
  * Joseph Shieh, 1031718, josephs2@uw.edu
@@ -22,7 +18,7 @@ import java.util.concurrent.BlockingQueue;
  */
 public class HttpProxy implements Runnable {
 	public static final int TOR_CELL_LENGTH = 512;
-	
+
 	ServerSocket proxyServerSocket;
 	int port;
 	Tor61Router router;
@@ -50,22 +46,22 @@ public class HttpProxy implements Runnable {
 		while (true) { // Listen forever, terminated by Ctrl-C
 			try {
 				Socket client = proxyServerSocket.accept();
-				
+
 				// add a new blocking queue associated with this socket to the router side so it can write to the queue
 				// cells that it wants to forward to this socket
 				router.addNewQueueForSocket(client);
-				
+
 				// Now that we have a client to to communicate with, create new thread
 				Listen l = new Listen(client);
 				Thread t = new Thread(l);
 				t.start();
-				
+
 				// Start a writer thread that will constantly read from a blocking queue and write to the socket
 				/*Writer w = new Writer(client);
 				Thread t2 = new Thread(w);
 				t2.start();*/
 				router.makeWriter(client);
-				
+
 			} catch (IOException e) {
 				System.out.println("Failed to accept connection.");
 			}
@@ -119,8 +115,11 @@ public class HttpProxy implements Runnable {
 						sidToClient.put(streamId, socket);
 						// Send a relay begin cell
 						router.relayBegin(streamId, hostAddr + ":" + port);
-						System.out.println("Breaking from http proxy while loop");
-						break;
+						try {
+							Thread.sleep(2000);
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+						}
 					} else if (temp.startsWith("connection:")) {
 						// Make connection close instead of
 						outputLine += "Connection: close" + EOF;
@@ -147,7 +146,7 @@ public class HttpProxy implements Runnable {
 						int count = requestStream.available(); // count the available bytes form the input stream
 						byte[] cellEnd = new byte[count];
 						dis.read(cellEnd);
-				        router.relayDataCell(streamId, cellEnd, count);
+						router.relayDataCell(streamId, cellEnd, count);
 
 						//SendAndReceive s = new SendAndReceive(destAddr, port, outputLine);
 						//Thread t = new Thread(s);
