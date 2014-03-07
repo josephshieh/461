@@ -544,12 +544,12 @@ public class Tor61Router implements Runnable {
 	 */
 	public void relayDataCell(RouterCircuit from, int streamId, byte[] body, int bodyLen) {
 		byte[] m = new byte[TOR_CELL_LENGTH];
-		RouterCircuit dest = routingTable.getDest(from); // (-1, -1) is starting point
 		int circId = -1;
 		long agentId = -1;
-		if (dest != null) {
-			circId = dest.circuitId;
-			agentId = dest.agentId;
+		RouterCircuit start = from.equals(new RouterCircuit(-1, -1)) ? routingTable.getDest(new RouterCircuit(-1,-1)): from;
+		if (from != null) {
+			circId = start.circuitId;
+			agentId = start.agentId;
 		}
 		System.out.println("agentid:" + agentId);
 		byte[] circIdBytes = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
@@ -578,7 +578,7 @@ public class Tor61Router implements Runnable {
 		}
 		try {
 			// Send the relay data cell
-			Socket send = aidToSocket.get(dest.agentId); // get the socket that we need to write to
+			Socket send = aidToSocket.get(start.agentId); // get the socket that we need to write to
 			//Socket send = torSockets.get(destNode);
 			String serviceNameHex = Long.toString(this.serviceData, 16);
 			int groupNum = Integer.valueOf(serviceNameHex.substring(0, serviceNameHex.length() - 4), 16);
