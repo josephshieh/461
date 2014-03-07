@@ -186,6 +186,7 @@ public class Tor61Router implements Runnable {
 				int type = buffer[2];
 				if (type == 6) { // Received "opened" message
 					System.out.println(nodeName + " Received response: OPENED");
+					socketToAid.put(send, Long.parseLong(destNode.serviceData));
 					aidToSocket.put(Long.parseLong(destNode.serviceData), send);
 					dest = create(send, destNode.serviceData);
 				} else if (type == 7) { // Open Failed
@@ -222,9 +223,11 @@ public class Tor61Router implements Runnable {
 					} else if (relayCmd == 7) {
 						System.out.println(nodeName + " Received: RELAY EXTENDED");
 						// If were not start point, forward towards the start point
+						System.out.println("socket isClosed: " + send.isClosed());
+						System.out.println("socketToAid contains:" + socketToAid.containsKey(send));
 						RouterCircuit from = new RouterCircuit(socketToAid.get(send), circId);
 						dest = routingTable.getDest(from);
-						if (dest != new RouterCircuit(-1, -1)) { // forward this cell back
+						if (!dest.equals(new RouterCircuit(-1, -1))) { // forward this cell back
 							System.out.println("Forwarding from...");
 							System.out.println("Source: {agentId: " + from.agentId + ", circId: " + from.circuitId + "}");
 							System.out.println("Dest: {agentId: " + dest.agentId + ", circId: " + dest.circuitId + "}");
@@ -429,6 +432,7 @@ public class Tor61Router implements Runnable {
 			int instanceNum = Integer.valueOf(serviceNameHex.substring(serviceNameHex.length() - 4, serviceNameHex.length()), 16);
 			String nodeName = "Tor61Router-" + String.format("%04d", groupNum) + "-" + String.format("%04d", instanceNum);
 			System.out.println(nodeName + " Sending message: RELAY EXTEND to " + agentId);
+			System.out.println("trying to send relay extend: socket isClosed " + (send.isClosed()));
 			OutputStream outputStream = send.getOutputStream(); //send.getOutputStream();
 			outputStream.write(m);
 			outputStream.flush();
@@ -654,8 +658,6 @@ public class Tor61Router implements Runnable {
 						Tor61NodeInfo info = new Tor61NodeInfo(src.getInetAddress(), src.getLocalPort(), opener + "");
 						if (serviceData == (int) opened && !torSockets.containsKey(info)) {
 							torSockets.put(info, src);
-							socketToAid.put(src, opener);
-							aidToSocket.put(opener, src);
 						} else {
 							// Received this message even though wrong address
 							System.out.println(nodeName + " Received incorrect message. {circId: " + circId +", type: " + type + "}");
@@ -667,6 +669,7 @@ public class Tor61Router implements Runnable {
 						for (int i = 3; i < TOR_CELL_LENGTH; i ++) { // This includes agent id of opener and opened, and padding
 							m[i] = buffer[i];
 						}
+						aidToSocket.put(opener, src);
 						socketToAid.put(src, opener);
 					} else if (type == 1) { // Create
 						System.out.println(nodeName + " Received message: CREATE => {circuitId:" + circId + "}");
