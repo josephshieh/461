@@ -54,9 +54,9 @@ public class Tor61Node {
 		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + String.format("%04d", groupNum));
 		/*List<Tor61NodeInfo> routerInfos = new ArrayList<Tor61NodeInfo>();
 		try {
-			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61074, "79953922"));
-			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61075, "79953923"));
-			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61076, "79953924"));
+			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61297, "79953922"));
+			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61298, "79953923"));
+			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61299, "79953924"));
 		} catch (UnknownHostException e1) {
 			// TODO Auto-generated catch block
 			e1.printStackTrace();

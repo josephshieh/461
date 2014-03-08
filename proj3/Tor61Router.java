@@ -225,6 +225,8 @@ public class Tor61Router implements Runnable {
 						System.out.println(nodeName + " Received: RELAY DATA");
 					} else if (relayCmd == 3) {
 						System.out.println(nodeName + " Received: RELAY END");
+						Tor61Cell cell = new Tor61Cell(buffer);
+						writeCellToQueueForSocket(sidToClientSocket.get(streamId), cell);
 					} else if (relayCmd == 4) { // Connected
 						System.out.println(nodeName + " Received: RELAY CONNECTED");
 					} else if (relayCmd == 7) {
@@ -870,8 +872,13 @@ public class Tor61Router implements Runnable {
 								System.out.println(nodeName + " Received message: RELAY DATA CELL");
 								Tor61Cell cell = new Tor61Cell(buffer);
 								writeCellToQueueForSocket(sidToServerSocket.get(streamId), cell);
-							} else if (relayCmd == 3) {
-
+							} else if (relayCmd == 3) { // END
+								/*System.out.println(nodeName + " Received message: RELAY END");
+								Socket socket = sidToClientSocket.get(streamId);
+								sidToClientSocket.remove(streamId);
+								if (socket != null && !socket.isClosed()) {
+									socket.close();
+								}*/
 							} else if (relayCmd == 6) {
 								String body = "";
 								int count = 0;
@@ -930,31 +937,51 @@ public class Tor61Router implements Runnable {
 		public void run() {
 			while (true) {
 				Tor61Cell cell = takeFromQueue(this.socket); // this call will block until an element is returned
-
+				
 				if (cell != null) { // if the wait for a non emtpy queue was interrupted
 					// extra the byte array message and forward it to the socket
 					byte[] message = cell.data;
-
-					// Extract body(http request string) and put write to socket
-					int bodyLength = 0;
-					for (int i = 11; i < 13; i++) {
-						bodyLength = (bodyLength << 8) + (message[i] & 0xff);
+					
+					int streamId = 0;
+					// convert the stream id bytes to a value
+					for (int i = 3; i < 5; i++) {
+						streamId = (streamId << 8) + (message[i] & 0xff);
 					}
-
-					byte[] body = new byte[bodyLength];
-
-					for (int i = 0; i < bodyLength; i++) { // copy body of message into body array
-						body[i] = message[i + 14];
-					}
-
-					OutputStream outputStream =  null;
-					try {
-						outputStream = this.socket.getOutputStream();
-						outputStream.write(body);
-						outputStream.flush();
-						System.out.println("Writing " + bodyLength + " bytes to server");
-					} catch (IOException e) {
-						e.printStackTrace();
+					int relayCmd = message[13];
+					if (relayCmd == 3) { // Relay end, close client socket
+						System.out.println("ENDING CONNECTION TO BROWSER: RELAY END");
+						Socket socket = sidToClientSocket.get(streamId);
+						sidToClientSocket.remove(streamId);
+						if (socket != null && !socket.isClosed()) {
+							try {
+								socket.close();
+							} catch (IOException e) {
+								e.printStackTrace();
+							}
+						}
+					} else if (relayCmd == 2) { // data cell
+						// Extract body(http request string) and put write to socket
+						int bodyLength = 0;
+						for (int i = 11; i < 13; i++) {
+							bodyLength = (bodyLength << 8) + (message[i] & 0xff);
+						}
+						
+						 
+						byte[] body = new byte[bodyLength];
+	
+						for (int i = 0; i < bodyLength; i++) { // copy body of message into body array
+							body[i] = message[i + 14];
+						}
+	
+						OutputStream outputStream =  null;
+						try {
+							outputStream = this.socket.getOutputStream();
+							outputStream.write(body);
+							outputStream.flush();
+							System.out.println("Writing " + bodyLength + " bytes to server");
+						} catch (IOException e) {
+							e.printStackTrace();
+						}
 					}
 				}
 			}
@@ -998,7 +1025,7 @@ public class Tor61Router implements Runnable {
 				}
 
 				// Send relay end since we're done with this response
-				//relayEnd(streamId);
+				relayEnd(streamId);
 
 				sidToServerSocket.remove(streamId);
 				webServerSocketToSid.remove(server);

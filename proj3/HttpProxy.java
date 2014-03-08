@@ -52,9 +52,6 @@ public class HttpProxy implements Runnable {
 				t.start();
 
 				// Start a writer thread that will constantly read from a blocking queue and write to the socket
-				/*Writer w = new Writer(client);
-				Thread t2 = new Thread(w);
-				t2.start();*/
 				router.makeWriter(client);
 
 			} catch (IOException e) {
@@ -77,7 +74,6 @@ public class HttpProxy implements Runnable {
 		@Override
 		public void run() {
 			try{
-				//OutputStream outputStream = socket.getOutputStream();
 				BufferedReader inputStream = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 				String inputLine, outputLine = "";
 				boolean first = true;
@@ -132,12 +128,7 @@ public class HttpProxy implements Runnable {
 						dis = new DataInputStream(requestStream);
 						RouterCircuit start = new RouterCircuit(-1, -1);
 						while (dis.available() >= (TOR_CELL_LENGTH - 14)) { // if anything is available, its guaranteed to be 512 bytes
-							//try {
 							dis.readFully(cellBody);
-							//} catch (EOFException e) { // When other node closes
-							//System.out.println("Caught eof exception");
-							//continue;
-							//}
 							router.relayDataCell(start, streamId, cellBody, TOR_CELL_LENGTH - 14);
 						}
 						// read the remainder of the requestStream
@@ -154,61 +145,6 @@ public class HttpProxy implements Runnable {
 				System.out.println("Failed to get socket.");
 				System.exit(1);
 			}
-		}
-
-		/**
-		 * This is for redirecting requests to the web server and receiving responses back.
-		 */
-		class SendAndReceive implements Runnable {
-			Socket sendAndReceive;
-			String outputLine;
-
-			public SendAndReceive(/*InetAddress destAddr, int port, */String outputLine, Socket webServer) {
-				//try {
-				//sendAndReceive = new Socket(destAddr, port);
-				sendAndReceive = webServer;
-				//} catch (IOException e) {
-				//System.out.println("Failed to find socket on web server.");
-				//}
-				this.outputLine = outputLine;
-			}
-
-			@Override
-			public void run() {
-				try {
-					// Redirect the packet to the web server
-					InputStream inputStream = sendAndReceive.getInputStream();
-					PrintWriter outputStream = new PrintWriter(sendAndReceive.getOutputStream(), true);
-					// Write to web server as string
-					outputStream.write(outputLine);
-					outputStream.flush();
-					// Read response as bytes
-					byte[] buffer = new byte[1000];
-					//byte[] bufferFinal = new byte[1000];
-					int len;
-					while((len = inputStream.read(buffer)) > 0) {
-						/*String temp = new String(buffer);
-						boolean changed = false;
-						if (temp.contains("Connection: keep-alive")) {
-							System.out.println("HAHAHA");
-							temp.replaceAll("Connection: keep-alive", "Connection: close");
-							changed = true;
-						}
-						bufferFinal = temp.getBytes();
-						if (changed) {
-							this.clientOutputStream.write(bufferFinal, 0, len-5);
-						} else {
-							this.clientOutputStream.write(bufferFinal, 0, len);
-						}*/
-						// Write to client as bytes as well
-						//this.clientOutputStream.write(buffer, 0, len);
-					}
-					//this.clientOutputStream.flush();
-				} catch (IOException e) {
-					//e.printStackTrace();
-				}
-			}
-
 		}
 	}
 }
