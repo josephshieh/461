@@ -40,7 +40,8 @@ public class HttpProxy implements Runnable {
 		while (true) { // Listen forever, terminated by Ctrl-C
 			try {
 				Socket client = proxyServerSocket.accept();
-
+				client.setKeepAlive(true);
+				
 				// add a new blocking queue associated with this socket to the router side so it can write to the queue
 				// cells that it wants to forward to this socket
 				router.addNewQueueForSocket(client);
@@ -83,6 +84,7 @@ public class HttpProxy implements Runnable {
 				String temp, hostAddr = "";
 				int port = 80;
 				int streamId = -1;
+				boolean streamSet = false;
 				while ((inputLine = inputStream.readLine()) != null) {
 					if (first){
 						// Print the first line of the request
@@ -100,19 +102,21 @@ public class HttpProxy implements Runnable {
 						}
 						hostAddr = hostString[0];
 						outputLine += inputLine + EOF;
-
-						Random r = new Random();
-						streamId = r.nextInt(65536);
-						while (router.sidToClientSocketContainsKey(streamId)){
+						
+						if (!streamSet) {
+							Random r = new Random();
 							streamId = r.nextInt(65536);
-						}
-						router.addSidToClientSocket(streamId, socket);
-						// Send a relay begin cell
-						router.relayBegin(streamId, hostAddr + ":" + port);
-						try {
-							Thread.sleep(2000);
-						} catch (InterruptedException e) {
-							e.printStackTrace();
+							while (router.sidToClientSocketContainsKey(streamId)){
+								streamId = r.nextInt(65536);
+							}
+							router.addSidToClientSocket(streamId, socket);
+							// Send a relay begin cell
+							router.relayBegin(streamId, hostAddr + ":" + port);
+							try {
+								Thread.sleep(2000);
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
 						}
 					} else if (temp.startsWith("connection:")) {
 						// Make connection close instead of
@@ -120,7 +124,6 @@ public class HttpProxy implements Runnable {
 					} else if (temp.equals("")) {
 						// End of request's HTTP header
 						outputLine += EOF;
-						InetAddress destAddr = InetAddress.getByName(hostAddr);
 						// Convert entire request to relay data cells and send them towards web server
 						byte[] cellBody = new byte[TOR_CELL_LENGTH - 14]; // take away the space for relay message headers
 						InputStream requestStream = null;
@@ -138,14 +141,10 @@ public class HttpProxy implements Runnable {
 							router.relayDataCell(start, streamId, cellBody, TOR_CELL_LENGTH - 14);
 						}
 						// read the remainder of the requestStream
-						int count = requestStream.available(); // count the available bytes form the input stream
+						int count = dis.available(); // count the available bytes form the input stream
 						byte[] cellEnd = new byte[count];
-						dis.read(cellEnd);
+						dis.readFully(cellEnd);
 						router.relayDataCell(start, streamId, cellEnd, count);
-
-						//SendAndReceive s = new SendAndReceive(destAddr, port, outputLine);
-						//Thread t = new Thread(s);
-						//t.start();
 					} else { // not host or connection
 						outputLine += inputLine + EOF;
 					}
@@ -213,5 +212,4 @@ public class HttpProxy implements Runnable {
 		}
 	}
 }
-
 

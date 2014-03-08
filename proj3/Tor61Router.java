@@ -847,6 +847,8 @@ public class Tor61Router implements Runnable {
 								String[] serverAddrString = serverAddr.split(":");
 								// Open tcp connection with web server
 								Socket webServerSocket = new Socket(serverAddrString[0], Integer.parseInt(serverAddrString[1]));
+								webServerSocket.setKeepAlive(true);
+								
 								sidToServerSocket.put(streamId, webServerSocket);
 								webServerSocketToSid.put(webServerSocket, streamId);
 
@@ -996,7 +998,7 @@ public class Tor61Router implements Runnable {
 				}
 
 				// Send relay end since we're done with this response
-				relayEnd(streamId);
+				//relayEnd(streamId);
 
 				sidToServerSocket.remove(streamId);
 				webServerSocketToSid.remove(server);
