@@ -4,8 +4,6 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Random;
@@ -41,7 +39,7 @@ public class HttpProxy implements Runnable {
 			try {
 				Socket client = proxyServerSocket.accept();
 				client.setKeepAlive(true);
-				
+
 				// add a new blocking queue associated with this socket to the router side so it can write to the queue
 				// cells that it wants to forward to this socket
 				router.addNewQueueForSocket(client);
@@ -98,7 +96,7 @@ public class HttpProxy implements Runnable {
 						}
 						hostAddr = hostString[0];
 						outputLine += inputLine + EOF;
-						
+
 						if (!streamSet) {
 							Random r = new Random();
 							streamId = r.nextInt(65536);
@@ -121,6 +119,8 @@ public class HttpProxy implements Runnable {
 						// End of request's HTTP header
 						outputLine += EOF;
 						// Convert entire request to relay data cells and send them towards web server
+						System.out.println("Browser Request: ");
+						System.out.println(outputLine);
 						byte[] cellBody = new byte[TOR_CELL_LENGTH - 14]; // take away the space for relay message headers
 						InputStream requestStream = null;
 						DataInputStream dis = null;

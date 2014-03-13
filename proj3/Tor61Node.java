@@ -1,6 +1,5 @@
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
@@ -50,17 +49,9 @@ public class Tor61Node {
 		// Create a circuit
 		// Fetch all nodes that are ours
 		//System.out.println("Service Data:" + serviceData);
-		
+
 		List<Tor61NodeInfo> routerInfos = agent.fetch("Tor61Router-" + String.format("%04d", groupNum));
-		/*List<Tor61NodeInfo> routerInfos = new ArrayList<Tor61NodeInfo>();
-		try {
-			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61297, "79953922"));
-			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61298, "79953923"));
-			routerInfos.add(new Tor61NodeInfo(InetAddress.getByName("172.28.7.64"), 61299, "79953924"));
-		} catch (UnknownHostException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}*/
+
 		// Remove our own node from the fetched list
 		for (int i = 0; i < routerInfos.size(); i++) {
 			Tor61NodeInfo item = routerInfos.get(i);
