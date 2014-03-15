@@ -77,6 +77,11 @@ public class BitCoins {
 			byte[] prevTxOutputIndexBytes = getByteArr(fileBytes, i + 32, 2);
 			byte[] signatureBytes = getByteArr(fileBytes, i + 32 + 2, 128);
 			byte[] publicKeyLenBytes = getByteArr(fileBytes, i + 32 + 2 + 128, 2);
+			System.out.println("1:" + bytesToString(prevTxOutputIndexBytes, 0, prevTxOutputIndexBytes.length));
+			System.out.println("2:" + bytesToString(signatureBytes, 0, signatureBytes.length));
+			System.out.println("3:" + bytesToString(publicKeyLenBytes, 0, publicKeyLenBytes.length));
+			//System.out.println("5:" + bytesToString(fileBytes, 0, 32));
+			
 			byte[] publicKeyBytes = null; // = getByteArr(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen);
 			// Process each input specifier
 			for (int k = 0; k < nInputs; k++) {
@@ -90,6 +95,7 @@ public class BitCoins {
 				System.out.println("   public key: " + publicKey);
 				
 				publicKeyBytes = getByteArr(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen);
+				System.out.println("4:" + bytesToString(publicKeyBytes, 0, publicKeyBytes.length));
 				
 				RSAPublicKey pk = publicKeyFromBytes(getByteArr(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen));
 				
@@ -110,12 +116,13 @@ public class BitCoins {
 					nOutputsBytes.length + nOutputs * 36;
 			byte[] currentTransaction = new byte[sizeSoFar];
 			
-			System.arraycopy(currentTransaction, 0, nInputsBytes, 0, nInputsBytes.length);
-			System.arraycopy(currentTransaction, nInputsBytes.length, prevTxRefBytes, 0, prevTxRefBytes.length);
-			System.arraycopy(currentTransaction, nInputsBytes.length + prevTxRefBytes.length, prevTxOutputIndexBytes, 0, prevTxOutputIndexBytes.length);
-			System.arraycopy(currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length, publicKeyLenBytes, 0, publicKeyLenBytes.length);
-			System.arraycopy(currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length, publicKeyBytes, 0, publicKeyBytes.length);
-			System.arraycopy(currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length + publicKeyBytes.length, nOutputsBytes, 0, nOutputsBytes.length);
+			System.arraycopy(nInputsBytes, 0, currentTransaction, 0, nInputsBytes.length);
+			
+			System.arraycopy(prevTxRefBytes, 0, currentTransaction, nInputsBytes.length, prevTxRefBytes.length);
+			System.arraycopy(prevTxOutputIndexBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length, prevTxOutputIndexBytes.length);
+			System.arraycopy(publicKeyLenBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length, publicKeyLenBytes.length);
+			System.arraycopy(publicKeyBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length, publicKeyBytes.length);
+			System.arraycopy(nOutputsBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length + publicKeyBytes.length, nOutputsBytes.length);
 			
 			byte[] outputSpecifiers = new byte[nOutputs * 36];
 			// Process each output specifier
@@ -127,15 +134,20 @@ public class BitCoins {
 					outputSpecifiers[l + k * 36] = valueBytes[l]; 
 				}
 				
+				System.out.println("5:" + bytesToString(fileBytes, 0, 32));
+				
 				for (int l = 0; l < dHashPublicKeyBytes.length; l++) {
 					outputSpecifiers[l + 4 + k * 36] = dHashPublicKeyBytes[l]; 
 				}
+				
+				System.out.println("6:" + bytesToString(fileBytes, 0, 32));
 				
 				System.out.println("   TxOut");
 				System.out.println("      value: " + bytesToInt(fileBytes, i)); // Change 40 to CONSTANT?
 				System.out.println("      dHashPublicKey: " + bytesToString(fileBytes, i + 4, 32)); // Change 32 to CONSTANT?
 				i += 36;
 			}
+			System.arraycopy(outputSpecifiers, 0, currentTransaction, currentTransaction.length - outputSpecifiers.length, outputSpecifiers.length);
 			
 			System.out.println("      test: " + bytesToString(currentTransaction, 0, currentTransaction.length));
 			
@@ -143,12 +155,7 @@ public class BitCoins {
 			System.out.println("      dHash: " + bytesToString(dHash, 0, dHash.length));
 		}
 		
-		// Genesis block size
-		//i += 290; // 82 + 4 + 204
 		testMerkleTree();
-		while (i < fileBytes.length) {
-			// Read transactions
-		}
 	}
 	
 	
