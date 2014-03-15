@@ -43,6 +43,7 @@ import javax.crypto.Cipher;
  */
 public class BitCoins {
 	static Map<String, List<OutputSpecifier>> txToOutputList;
+	static Map<String, Integer> balances;
 
 	public static void main(String[] args) {
 		Security.addProvider(new BouncyCastleProvider()); // For encrypting/decrypting
@@ -55,18 +56,20 @@ public class BitCoins {
 		String outFilename = args[3];
 		byte[] fileBytes = read(inFilename);
 		int i = 0;
+
 		txToOutputList = new HashMap<String, List<OutputSpecifier>>();
+		balances = new HashMap<String, Integer>();
 
 		// Read Genesis Block info
 		readGenesisBlock(fileBytes);
 		System.out.println();
 		
 		//write(getByteArr(fileBytes, 0, 126), outFilename);
-		
+
 		// Transaction Count of the rest
 		int transactionCount = bytesToInt(fileBytes, 126);
 		System.out.println("Transaction count: " + transactionCount);
-
+		int tips = 0;
 		int invalidTx = 0;
 		List<byte[]> allTx = new ArrayList<byte[]>(); // dHashed
 		List<byte[]> allFullTxBytes = new ArrayList<byte[]>();
@@ -75,16 +78,18 @@ public class BitCoins {
 		// First transaction at index 130
 		List<Integer> notRsa = new ArrayList<Integer>();
 		for (int j = 0; j < transactionCount; j++) {
+			Map<String, Integer> tempBalances = new HashMap<String, Integer>(balances);
 			int startIndex = i;
 			boolean invalid = false;
 			int inputTotal = 0;
 			int outputTotal = 0;
+			int curTip = 0;
 			System.out.println("Transaction # " + j + " ---------------------------------------------------------");
 			short nInputs = bytesToShort(fileBytes, i);
 			System.out.println("   nInputs: " + nInputs);
 			byte[] nInputsBytes = getByteArr(fileBytes, i, 2);
 			i += 2;
-
+			String curHashedPubKey = null;
 			List<byte[]> prevTxRefBytesList = new ArrayList<byte[]>();
 			List<byte[]> prevTxOutputIndexBytesList = new ArrayList<byte[]>();
 			List<byte[]> publicKeyLenBytesList = new ArrayList<byte[]>();
@@ -139,19 +144,23 @@ public class BitCoins {
 					List<OutputSpecifier> list = txToOutputList.get(prevTxRef);
 					if (prevTxOutputIndex < list.size()) {
 						OutputSpecifier op = list.get(prevTxOutputIndex);
+						String hashedPubKey = op.hashedPublicKey;
+						curHashedPubKey = bytesToString(dHash(publicKeyBytes), 0, 32);
+						if (!hashedPubKey.equals(curHashedPubKey)) {
+							invalid = true;
+						}
 						if (!op.used) {
 							op.used = true;
 							inputTotal += op.value;
 							list.set(prevTxOutputIndex, op);
+							// Remove balance from sender
+							int oldGiver = tempBalances.get(hashedPubKey);
+							tempBalances.put(hashedPubKey, oldGiver - op.value);
 						} else {
 							invalid = true;
 						}
 
-						String hashedPubKey = op.hashedPublicKey;
 
-						if (!hashedPubKey.equals(bytesToString(dHash(publicKeyBytes), 0, 32))) {
-							invalid = true;
-						}
 					} else {
 						invalid = true;
 					}
@@ -212,6 +221,13 @@ public class BitCoins {
 				i += 36;
 				list.add(new OutputSpecifier(outputVal, hashedPublicKey));
 				outputTotal += outputVal;
+				// Add values to receiver
+				if (tempBalances.containsKey(hashedPublicKey)) {
+					int oldReceiver = tempBalances.get(hashedPublicKey);
+					tempBalances.put(hashedPublicKey, oldReceiver + outputVal);
+				} else {
+					tempBalances.put(hashedPublicKey, outputVal);
+				}
 			}
 
 			System.arraycopy(outputSpecifiers, 0, currentTransaction, currentTransaction.length - outputSpecifiers.length, outputSpecifiers.length);
@@ -224,10 +240,18 @@ public class BitCoins {
 			byte[] fullTxBytes = getByteArr(fileBytes, startIndex, i - startIndex);
 			byte[] dHashFullTx = dHash(fullTxBytes);
 			String fullTx = bytesToString(dHashFullTx, 0, 32);
-			
+
+			System.out.println("full dHash: " + fullTx);
+			if (!txToOutputList.containsKey(fullTx)) {
+				invalid = true;
+			}
+
 
 			if (outputTotal > inputTotal) {
 				invalid = true;
+			} else {
+				curTip = inputTotal - outputTotal;
+				tips += curTip;
 			}
 
 			if (invalid) {
@@ -238,12 +262,12 @@ public class BitCoins {
 					allTx.add(dHashFullTx);
 					allFullTxBytes.add(fullTxBytes);
 					allTxFullLength += fullTxBytes.length;
-				}/* else {
-					invalid = true;
-				}*/
+				}
+				tempBalances.put(curHashedPubKey, tempBalances.get(curHashedPubKey) + curTip);
+				balances = new HashMap<String, Integer>(tempBalances);
 			}
+
 		}
-		System.out.println("notRsa count:" + notRsa.size());
 		System.out.println("invalidTx count:" + invalidTx);
 		
 		// Write new file
@@ -313,6 +337,17 @@ public class BitCoins {
 		byte[] dHashCoinbase = dHash(coinbaseTransaction);
 		allTx.add(0, dHashCoinbase);
 		System.out.println("size:" + allTx.size());
+
+		System.out.println("tips count:" + tips);
+		int totalBitcoins = 0;
+		System.out.println("Balances: ");
+		for (String hashedPubKey: balances.keySet()) {
+			int coins = balances.get(hashedPubKey);
+			System.out.println("Hashed Public Key " + hashedPubKey + ": " + coins);
+			totalBitcoins += coins;
+		}
+		System.out.println("Total number of bitcoins: " + totalBitcoins);
+
 		byte[] merkleRoot = merkleTree(allTx);
 		
 		System.out.println("Merk:" + bytesToString(merkleRoot, 0, 32));
@@ -359,11 +394,8 @@ public class BitCoins {
 			// decrypt the text using the given public key
 			cipher.init(Cipher.DECRYPT_MODE, key);
 			dectyptedText = cipher.doFinal(text);
-		} catch (IllegalArgumentException ex) {
-			return null; // not an RSA key
-		}
-		catch (Exception ex) {
-			ex.printStackTrace();
+		} catch (Exception ex) {
+			return null;
 		}
 		return dectyptedText;
 	}
@@ -415,6 +447,7 @@ public class BitCoins {
 		System.out.println("         value: " + outputVal);
 		String hashedPublicKey = bytesToString(fileBytes, 94, 32);
 		System.out.println("         dHashPublicKey: " + hashedPublicKey);
+		balances.put(hashedPublicKey, outputVal);
 		if (!txToOutputList.containsKey(tx)) {
 			List<OutputSpecifier> list = new ArrayList<OutputSpecifier>();
 			list.add(new OutputSpecifier(outputVal, hashedPublicKey));
