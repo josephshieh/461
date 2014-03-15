@@ -35,7 +35,7 @@ import javax.crypto.Cipher;
  *
  */
 public class BitCoins {
-	static Map<String, OutputSpecifier> txToOutputSpecifier;
+	static Map<String, List<OutputSpecifier>> txToOutputList;
 
 	public static void main(String[] args) {
 		Security.addProvider(new BouncyCastleProvider()); // For encrypting/decrypting
@@ -48,7 +48,8 @@ public class BitCoins {
 		String outFilename = args[3];
 		byte[] fileBytes = read(inFilename);
 		int i = 0;
-		txToOutputSpecifier = new HashMap<String, OutputSpecifier>();
+		txToOutputList = new HashMap<String, List<OutputSpecifier>>();
+
 		// Read Genesis Block info
 		readGenesisBlock(fileBytes);
 		System.out.println();
@@ -56,12 +57,14 @@ public class BitCoins {
 		int transactionCount = bytesToInt(fileBytes, 126);
 		System.out.println("Transaction count: " + transactionCount);
 
-		int invalidTransactions = 0;
-		
+		int invalidTx = 0;
+		List<byte[]> allTx = new ArrayList<byte[]>();
 		i = 130; // Genesis stuff plus transaction count processed
 		// First transaction at index 130
 		List<Integer> notRsa = new ArrayList<Integer>();
 		for (int j = 0; j < transactionCount; j++) {
+			int startIndex = i;
+			boolean invalid = false;
 			int inputTotal = 0;
 			int outputTotal = 0;
 			System.out.println("Transaction # " + j + " ---------------------------------------------------------");
@@ -69,7 +72,7 @@ public class BitCoins {
 			System.out.println("   nInputs: " + nInputs);
 			byte[] nInputsBytes = getByteArr(fileBytes, i, 2);
 			i += 2;
-		
+
 			List<byte[]> prevTxRefBytesList = new ArrayList<byte[]>();
 			List<byte[]> prevTxOutputIndexBytesList = new ArrayList<byte[]>();
 			List<byte[]> publicKeyLenBytesList = new ArrayList<byte[]>();
@@ -79,11 +82,12 @@ public class BitCoins {
 			byte[] publicKeyLenBytes = null;
 			byte[] publicKeyBytes = null;
 			int transactionSizeSoFar = nInputsBytes.length;
-			
+
 			// Process each input specifier
 			byte[] decryptedSignature = null;
 			for (int k = 0; k < nInputs; k++) {
-				System.out.println("   prevTxRef: " + bytesToString(fileBytes, i, 32));
+				String prevTxRef = bytesToString(fileBytes, i, 32);
+				System.out.println("   prevTxRef: " + prevTxRef);
 				short prevTxOutputIndex = bytesToShort(fileBytes, i + 32);
 				System.out.println("   prevTxOutputIndex: " + prevTxOutputIndex);
 				String signature = bytesToString(fileBytes, i + 32 + 2, 128);
@@ -98,6 +102,7 @@ public class BitCoins {
 				if (decryptedSignature == null) {
 					System.out.println("INVALID: NOT AN RSA");
 					notRsa.add(j);
+					invalid = true;
 				}
 				if (decryptedSignature != null) {
 					System.out.println("   decryptedSignature:" + bytesToString(decryptedSignature, 0, decryptedSignature.length));
@@ -107,32 +112,53 @@ public class BitCoins {
 				prevTxOutputIndexBytes = getByteArr(fileBytes, i + 32, 2);
 				publicKeyLenBytes = getByteArr(fileBytes, i + 32 + 2 + 128, 2);
 				publicKeyBytes = getByteArr(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen);
-				
+
 				// Save the byte[]'s that well need to recreate the entire transaction later
 				prevTxRefBytesList.add(prevTxRefBytes);
 				prevTxOutputIndexBytesList.add(prevTxOutputIndexBytes);
 				publicKeyLenBytesList.add(publicKeyLenBytes);
 				publicKeyBytesList.add(publicKeyBytes);
-				
+
 				transactionSizeSoFar += prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length + publicKeyBytes.length;
-				
+
 				i += 164; // increment to account for everything except variable public key length (final field)
 				i += publicKeyLen;
-				if (txToOutputSpecifier.containsKey(prevTxRef)) {
+				if (txToOutputList.containsKey(prevTxRef)) {
+					List<OutputSpecifier> list = txToOutputList.get(prevTxRef);
+					if (prevTxOutputIndex < list.size()) {
+						OutputSpecifier op = list.get(prevTxOutputIndex);
+						if (!op.used) {
+							op.used = true;
+							inputTotal += op.value;
+							list.set(prevTxOutputIndex, op);
+						} else {
+							invalid = true;
+						}
 
+						String hashedPubKey = op.hashedPublicKey;
+
+						if (!hashedPubKey.equals(bytesToString(dHash(publicKeyBytes), 0, 32))) {
+							invalid = true;
+						}
+					} else {
+						invalid = true;
+					}
+
+				} else {
+					invalid = true;
 				}
 			}
 
 			byte[] nOutputsBytes = getByteArr(fileBytes, i, 2);
 			transactionSizeSoFar += nOutputsBytes.length;
-			
+
 			short nOutputs = bytesToShort(fileBytes, i);
 			System.out.println("   nOutputs: " + nOutputs);
 			i += 2;
-	
+
 			transactionSizeSoFar += nOutputs * 36; // At this point we will know exactly how large of an array to make for the entire transaction
 			byte[] currentTransaction = new byte[transactionSizeSoFar];
-			
+
 			// Start building up the transaction without signatures
 			System.arraycopy(nInputsBytes, 0, currentTransaction, 0, nInputsBytes.length); // only one instance of this
 			int inputSpecifierOffset = 0;
@@ -145,7 +171,7 @@ public class BitCoins {
 				size2 = prevTxOutputIndexBytesList.get(l).length;
 				size3 = publicKeyLenBytesList.get(l).length;
 				size4 = publicKeyBytesList.get(l).length;
-				
+
 				System.arraycopy(prevTxRefBytesList.get(l), 0, currentTransaction, inputSpecifierOffset + nInputsBytes.length, size1);
 				System.arraycopy(prevTxOutputIndexBytesList.get(l), 0, currentTransaction, inputSpecifierOffset + nInputsBytes.length + size1, size2);
 				System.arraycopy(publicKeyLenBytesList.get(l), 0, currentTransaction, inputSpecifierOffset + nInputsBytes.length + size1 + size2, size3);
@@ -159,48 +185,71 @@ public class BitCoins {
 			// Process each output specifier
 			byte[] valueBytes = null;
 			byte[] dHashPublicKeyBytes = null;
+			List<OutputSpecifier> list = new ArrayList<OutputSpecifier>();
 			for (int k = 0; k < nOutputs; k++) {
 				valueBytes = getByteArr(fileBytes, i, 4);
 				dHashPublicKeyBytes = getByteArr(fileBytes, i + 4, 32);
-				
+
 				System.arraycopy(valueBytes, 0, outputSpecifiers, k * 36, valueBytes.length);
 				System.arraycopy(dHashPublicKeyBytes, 0, outputSpecifiers, 4 + k * 36, dHashPublicKeyBytes.length);
 				System.out.println("   TxOut");
 				int outputVal = bytesToInt(fileBytes, i);
 				System.out.println("      value: " + outputVal); // Change 40 to CONSTANT?
-				System.out.println("      dHashPublicKey: " + bytesToString(fileBytes, i + 4, 32)); // Change 32 to CONSTANT?
+				String hashedPublicKey = bytesToString(fileBytes, i + 4, 32);
+				System.out.println("      dHashPublicKey: " + hashedPublicKey); // Change 32 to CONSTANT?
 				i += 36;
+				list.add(new OutputSpecifier(outputVal, hashedPublicKey));
 				outputTotal += outputVal;
 			}
+
 			System.arraycopy(outputSpecifiers, 0, currentTransaction, currentTransaction.length - outputSpecifiers.length, outputSpecifiers.length);
-			
+
 			//System.out.println("Text:" + bytesToString(currentTransaction, 0, currentTransaction.length));
-			
+
 			byte[] dHash = dHash(currentTransaction);
 			System.out.println("dHash: " + bytesToString(dHash, 0, dHash.length));
+
+			byte[] fullTxBytes = getByteArr(fileBytes, startIndex, i - startIndex);
+			byte[] dHashFullTx = dHash(fullTxBytes);
+			String fullTx = bytesToString(dHashFullTx, 0, 32);
+			if (!txToOutputList.containsKey(fullTx)) {
+				txToOutputList.put(fullTx, list);
+				allTx.add(dHashFullTx);
+			} else {
+				invalid = true;
+			}
+
+			if (outputTotal > inputTotal) {
+				invalid = true;
+			}
+
+			if (invalid) {
+				invalidTx++;
+			}
 		}
 		System.out.println("notRsa count:" + notRsa.size());
-		//testMerkleTree();
+		System.out.println("invalidTx count:" + invalidTx);
+		byte[] merkleRoot = merkleTree(allTx);
 	}
 
 
 	// This will decrypt the given byte array using the given RSAPublic key and output a byte array
 	public static byte[] decrypt(byte[] text, RSAPublicKey key) {
 		byte[] dectyptedText = null;
-	    try {
-	    	// get an RSA cipher object and print the provider
-	    	final Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-	    	
-	    	// decrypt the text using the given public key
-	    	cipher.init(Cipher.DECRYPT_MODE, key);
-	    	dectyptedText = cipher.doFinal(text);
-	    } catch (IllegalArgumentException ex) {
-	    	return null; // not an RSA key
-	    }
-	    catch (Exception ex) {
-	    	ex.printStackTrace();
-	    }
-	    return dectyptedText;
+		try {
+			// get an RSA cipher object and print the provider
+			final Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+
+			// decrypt the text using the given public key
+			cipher.init(Cipher.DECRYPT_MODE, key);
+			dectyptedText = cipher.doFinal(text);
+		} catch (IllegalArgumentException ex) {
+			return null; // not an RSA key
+		}
+		catch (Exception ex) {
+			ex.printStackTrace();
+		}
+		return dectyptedText;
 	}
 
 	//
@@ -250,7 +299,11 @@ public class BitCoins {
 		System.out.println("         value: " + outputVal);
 		String hashedPublicKey = bytesToString(fileBytes, 94, 32);
 		System.out.println("         dHashPublicKey: " + hashedPublicKey);
-		txToOutputSpecifier.put(tx, new OutputSpecifier(outputVal, hashedPublicKey));
+		if (!txToOutputList.containsKey(tx)) {
+			List<OutputSpecifier> list = new ArrayList<OutputSpecifier>();
+			list.add(new OutputSpecifier(outputVal, hashedPublicKey));
+			txToOutputList.put(tx, list);
+		}
 		System.out.println("      Packed bytes: " + bytesToString(fileBytes, 86, 40));
 	}
 
