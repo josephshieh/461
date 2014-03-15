@@ -1,3 +1,4 @@
-#!/bin/bash                                                                    
-javac BitCoins.java
+#!/bin/bash  
+export CLASSPATH=${CLASSPATH}:./bcpkix-jdk15on-150.jar:./bcprov-jdk15on-150.jar                                                                
+javac *.java
 java BitCoins "$@"

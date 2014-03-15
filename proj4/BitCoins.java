@@ -12,20 +12,19 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.io.Reader;
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.Security;
-import java.security.Timestamp;
 import java.security.interfaces.RSAPublicKey;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -33,7 +32,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TimeZone;
 
 import javax.crypto.Cipher;
 
@@ -69,6 +67,9 @@ public class BitCoins {
 		// Transaction Count of the rest
 		int transactionCount = bytesToInt(fileBytes, 126);
 		System.out.println("Transaction count: " + transactionCount);
+		byte[] hashedPublicKeyBytes = hexStringToBytes("1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581"); //dHash of our public key, given in spec
+		String hashedPublicKey = bytesToString(hashedPublicKeyBytes, 0, hashedPublicKeyBytes.length);
+		balances.put(hashedPublicKey, 0);
 		int tips = 0;
 		int invalidTx = 0;
 		List<byte[]> allTx = new ArrayList<byte[]>(); // dHashed
@@ -216,23 +217,21 @@ public class BitCoins {
 				System.out.println("   TxOut");
 				int outputVal = bytesToInt(fileBytes, i);
 				System.out.println("      value: " + outputVal); // Change 40 to CONSTANT?
-				String hashedPublicKey = bytesToString(fileBytes, i + 4, 32);
-				System.out.println("      dHashPublicKey: " + hashedPublicKey); // Change 32 to CONSTANT?
+				String receiverHashedPubkey = bytesToString(fileBytes, i + 4, 32);
+				System.out.println("      dHashPublicKey: " + receiverHashedPubkey); // Change 32 to CONSTANT?
 				i += 36;
-				list.add(new OutputSpecifier(outputVal, hashedPublicKey));
+				list.add(new OutputSpecifier(outputVal, receiverHashedPubkey));
 				outputTotal += outputVal;
 				// Add values to receiver
-				if (tempBalances.containsKey(hashedPublicKey)) {
-					int oldReceiver = tempBalances.get(hashedPublicKey);
-					tempBalances.put(hashedPublicKey, oldReceiver + outputVal);
+				if (tempBalances.containsKey(receiverHashedPubkey)) {
+					int oldReceiver = tempBalances.get(receiverHashedPubkey);
+					tempBalances.put(receiverHashedPubkey, oldReceiver + outputVal);
 				} else {
-					tempBalances.put(hashedPublicKey, outputVal);
+					tempBalances.put(receiverHashedPubkey, outputVal);
 				}
 			}
 
 			System.arraycopy(outputSpecifiers, 0, currentTransaction, currentTransaction.length - outputSpecifiers.length, outputSpecifiers.length);
-
-			//System.out.println("Text:" + bytesToString(currentTransaction, 0, currentTransaction.length));
 
 			byte[] dHash = dHash(currentTransaction);
 			System.out.println("dHash: " + bytesToString(dHash, 0, dHash.length));
@@ -242,16 +241,9 @@ public class BitCoins {
 			String fullTx = bytesToString(dHashFullTx, 0, 32);
 
 			System.out.println("full dHash: " + fullTx);
-			if (!txToOutputList.containsKey(fullTx)) {
-				invalid = true;
-			}
-
 
 			if (outputTotal > inputTotal) {
 				invalid = true;
-			} else {
-				curTip = inputTotal - outputTotal;
-				tips += curTip;
 			}
 
 			if (invalid) {
@@ -263,7 +255,11 @@ public class BitCoins {
 					allFullTxBytes.add(fullTxBytes);
 					allTxFullLength += fullTxBytes.length;
 				}
-				tempBalances.put(curHashedPubKey, tempBalances.get(curHashedPubKey) + curTip);
+				curTip = inputTotal - outputTotal;
+				tips += curTip;
+				if (curTip > 0) { // Sanity check
+					tempBalances.put(hashedPublicKey, tempBalances.get(hashedPublicKey) + curTip);	
+				}
 				balances = new HashMap<String, Integer>(tempBalances);
 			}
 
@@ -284,7 +280,6 @@ public class BitCoins {
 		System.arraycopy(version, 0, blockOneHeader, 0, version.length);
 		
 		System.arraycopy(prevBlockRef, 0, blockOneHeader, 4, prevBlockRef.length); // next 32 bytes
-		
 		
 		SimpleDateFormat sdfDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 		Date now = new Date();
@@ -319,20 +314,17 @@ public class BitCoins {
 		byte[] coinbaseTransaction = new byte[40];
 		
 		byte[] nInputs = shortToBytes((short) 0);
-		System.arraycopy(nInputs, 0, output, 126 + 82 + 4, nInputs.length);
 		System.arraycopy(nInputs, 0, coinbaseTransaction, 0, nInputs.length);
 		
 		byte[] nOutputs = shortToBytes((short) 1);
-		System.arraycopy(nOutputs, 0, output, 126 + 82 + 4 + 2, nOutputs.length);
 		System.arraycopy(nOutputs, 0, coinbaseTransaction, 2, nOutputs.length);
 		
-		byte[] value = intToBytes(10 /*+ tips*/);
-		System.arraycopy(value, 0, output, 126 + 82 + 4 + 2 + 2, value.length);
+		byte[] value = intToBytes(10 + tips);
 		System.arraycopy(value, 0, coinbaseTransaction, 2 + 2, value.length);
 		
-		byte[] hashedPublicKey = hexStringToBytes("1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581"); //dHash of our public key, given in spec
-		System.arraycopy(hashedPublicKey, 0, output, 126 + 82 + 4 + 2 + 2 + 4, hashedPublicKey.length);
-		System.arraycopy(hashedPublicKey, 0, coinbaseTransaction, 2 + 2 + 4, hashedPublicKey.length);
+		System.arraycopy(hashedPublicKeyBytes, 0, coinbaseTransaction, 2 + 2 + 4, hashedPublicKeyBytes.length);
+		
+		System.arraycopy(coinbaseTransaction, 0, output, 126 + 82 + 4, coinbaseTransaction.length);
 		
 		byte[] dHashCoinbase = dHash(coinbaseTransaction);
 		allTx.add(0, dHashCoinbase);
@@ -340,33 +332,49 @@ public class BitCoins {
 
 		System.out.println("tips count:" + tips);
 		int totalBitcoins = 0;
+		
+		//PrintStream out = null;
+		PrintWriter out = null;
+		try {
+			//out = new PrintStream(new FileOutputStream("balances.txt"));
+			out = new PrintWriter(new FileWriter("balances.txt"), true);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 		System.out.println("Balances: ");
 		for (String hashedPubKey: balances.keySet()) {
 			int coins = balances.get(hashedPubKey);
 			System.out.println("Hashed Public Key " + hashedPubKey + ": " + coins);
+			if (out != null) {
+				//System.setOut(out);
+				out.write("Hashed Public Key " + hashedPubKey + ": " + coins + "\n");
+			}
 			totalBitcoins += coins;
+		}
+		if (out != null) {
+			out.close();
 		}
 		System.out.println("Total number of bitcoins: " + totalBitcoins);
 
 		byte[] merkleRoot = merkleTree(allTx);
 		
-		System.out.println("Merk:" + bytesToString(merkleRoot, 0, 32));
+		System.out.println("Merkle:" + bytesToString(merkleRoot, 0, 32));
 		System.arraycopy(merkleRoot, 0, blockOneHeader, 4 + 32, merkleRoot.length); // next 32 bytes
 		
 		System.out.println("block:" + bytesToString(blockOneHeader, 0, blockOneHeader.length));
-		
-		byte[] nonce = hexStringToBytes("ccd17b0000000000");
-		System.arraycopy(nonce, 0, blockOneHeader, 74, nonce.length);
-		/*byte[] nonce = null;
-		long counter = 0; // - Math.pow(2, 63)
+		System.out.println("Computing nonce...");
+		//byte[] nonce = hexStringToBytes("063a140000000000"); //ccd17b0000000000, 4843e00000000000
+		//System.arraycopy(nonce, 0, blockOneHeader, 74, nonce.length);
+		byte[] nonce = null;
+		long counter = 0; //(long) - Math.pow(2, 63); // Min value
 		while (!bytesToString(dHash(blockOneHeader), 0, 32).substring(0, 6).equals("000000")) {
 			nonce = longToBytes(counter);
 			System.arraycopy(nonce, 0, blockOneHeader, 74, nonce.length);
 			counter++;
 		}
 		
-		System.out.println("Nonce:" + bytesToString(nonce, 0, 8));
-		System.out.println("Long val of nonce:" + bytesToLong(nonce, 0));*/
+		System.out.println("Nonce computed:" + bytesToString(nonce, 0, 8));
+		System.out.println("Long value of nonce:" + bytesToLong(nonce, 0));
 		
 		System.arraycopy(blockOneHeader, 0, output, 126, blockOneHeader.length); // write to final output array
 		
@@ -377,7 +385,6 @@ public class BitCoins {
 			currentOffset += bytes.length;
 		}
 		
-		/*write(getByteArr(fileBytes, 0, 126), outFilename);*/
 		write(output, outFilename);
 		
 		
