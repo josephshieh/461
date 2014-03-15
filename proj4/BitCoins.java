@@ -1,4 +1,5 @@
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.PEMException;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
@@ -18,32 +19,23 @@ import java.io.OutputStream;
 import java.io.Reader;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.security.Key;
-import java.security.KeyFactory;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.Security;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.X509EncodedKeySpec;
-
-import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
-import org.bouncycastle.openssl.PEMException;
-import org.bouncycastle.openssl.PEMParser;
-import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
-
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-
+import java.util.Map;
 
 import javax.crypto.Cipher;
-import javax.crypto.NoSuchPaddingException;
 
 /**
  *  Joseph Shieh, Sergey Naumets
  *
  */
 public class BitCoins {
+	static Map<String, OutputSpecifier> txToOutputSpecifier;
 
 	public static void main(String[] args) {
 		Security.addProvider(new BouncyCastleProvider()); // For encrypting/decrypting
@@ -56,23 +48,27 @@ public class BitCoins {
 		String outFilename = args[3];
 		byte[] fileBytes = read(inFilename);
 		int i = 0;
+		txToOutputSpecifier = new HashMap<String, OutputSpecifier>();
+
 		// Read Genesis Block info
 		readGenesisBlock(fileBytes);
 		System.out.println();
 		// Transaction Count of the rest
 		int transactionCount = 1;//bytesToInt(fileBytes, 126);
 		System.out.println("Transaction count: " + transactionCount);
-		
-		
-		
+
+		int invalidTransactions = 0;
+
 		i = 130;
 		// First transaction at index 130
 		for (int j = 0; j < transactionCount; j++) {
+			int inputTotal = 0;
+			int outputTotal = 0;
 			byte[] nInputsBytes = getByteArr(fileBytes, i, 2);
 			short nInputs = bytesToShort(fileBytes, i);
 			System.out.println("   nInputs: " + nInputs);
 			i += 2;
-			
+
 			byte[] prevTxRefBytes = getByteArr(fileBytes, i, 32);
 			byte[] prevTxOutputIndexBytes = getByteArr(fileBytes, i + 32, 2);
 			byte[] signatureBytes = getByteArr(fileBytes, i + 32 + 2, 128);
@@ -81,7 +77,7 @@ public class BitCoins {
 			System.out.println("2:" + bytesToString(signatureBytes, 0, signatureBytes.length));
 			System.out.println("3:" + bytesToString(publicKeyLenBytes, 0, publicKeyLenBytes.length));
 			//System.out.println("5:" + bytesToString(fileBytes, 0, 32));
-			
+
 			byte[] publicKeyBytes = null; // = getByteArr(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen);
 			// Process each input specifier
 			for (int k = 0; k < nInputs; k++) {
@@ -93,102 +89,111 @@ public class BitCoins {
 				short publicKeyLen = bytesToShort(fileBytes, i + 32 + 2 + 128);
 				String publicKey = bytesToString(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen);
 				System.out.println("   public key: " + publicKey);
-				
+
 				publicKeyBytes = getByteArr(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen);
 				System.out.println("4:" + bytesToString(publicKeyBytes, 0, publicKeyBytes.length));
-				
+
 				RSAPublicKey pk = publicKeyFromBytes(getByteArr(fileBytes, i + 32 + 2 + 128 + 2, publicKeyLen));
-				
+
 				// Decrypt the signature with the provided public key
 				byte[] decryptedSignature = decrypt(getByteArr(fileBytes, i + 32 + 2, 128), pk);
 				System.out.println("   decryptedSignature:" + bytesToString(decryptedSignature, 0, decryptedSignature.length));
 
 				i += 164; // increment to account for everything except variable public key length (final field)
 				i += publicKeyLen;
+				if (txToOutputSpecifier.containsKey(prevTxRef)) {
+
+				}
 			}
-			
+
 			byte[] nOutputsBytes = getByteArr(fileBytes, i, 2);
 			short nOutputs = bytesToShort(fileBytes, i);
 			System.out.println("   nOutputs: " + nOutputs);
 			i += 2;
-			
+
 			int sizeSoFar = nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length + publicKeyBytes.length +
 					nOutputsBytes.length + nOutputs * 36;
 			byte[] currentTransaction = new byte[sizeSoFar];
-			
+
 			System.arraycopy(nInputsBytes, 0, currentTransaction, 0, nInputsBytes.length);
-			
+
 			System.arraycopy(prevTxRefBytes, 0, currentTransaction, nInputsBytes.length, prevTxRefBytes.length);
 			System.arraycopy(prevTxOutputIndexBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length, prevTxOutputIndexBytes.length);
 			System.arraycopy(publicKeyLenBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length, publicKeyLenBytes.length);
 			System.arraycopy(publicKeyBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length, publicKeyBytes.length);
 			System.arraycopy(nOutputsBytes, 0, currentTransaction, nInputsBytes.length + prevTxRefBytes.length + prevTxOutputIndexBytes.length + publicKeyLenBytes.length + publicKeyBytes.length, nOutputsBytes.length);
-			
+
 			byte[] outputSpecifiers = new byte[nOutputs * 36];
 			// Process each output specifier
 			for (int k = 0; k < nOutputs; k++) {
 				byte[] valueBytes = getByteArr(fileBytes, i, 4);
 				byte[] dHashPublicKeyBytes = getByteArr(fileBytes, i + 4, 32);
-				
+
 				for (int l = 0; l < valueBytes.length; l++) {
-					outputSpecifiers[l + k * 36] = valueBytes[l]; 
+					outputSpecifiers[l + k * 36] = valueBytes[l];
 				}
-				
+
 				System.out.println("5:" + bytesToString(fileBytes, 0, 32));
-				
+
 				for (int l = 0; l < dHashPublicKeyBytes.length; l++) {
-					outputSpecifiers[l + 4 + k * 36] = dHashPublicKeyBytes[l]; 
+					outputSpecifiers[l + 4 + k * 36] = dHashPublicKeyBytes[l];
 				}
-				
+
 				System.out.println("6:" + bytesToString(fileBytes, 0, 32));
-				
+
 				System.out.println("   TxOut");
-				System.out.println("      value: " + bytesToInt(fileBytes, i)); // Change 40 to CONSTANT?
+				int outputVal = bytesToInt(fileBytes, i);
+				System.out.println("      value: " + outputVal); // Change 40 to CONSTANT?
 				System.out.println("      dHashPublicKey: " + bytesToString(fileBytes, i + 4, 32)); // Change 32 to CONSTANT?
 				i += 36;
+				outputTotal += outputVal;
 			}
 			System.arraycopy(outputSpecifiers, 0, currentTransaction, currentTransaction.length - outputSpecifiers.length, outputSpecifiers.length);
-			
+
 			System.out.println("      test: " + bytesToString(currentTransaction, 0, currentTransaction.length));
-			
+
 			byte[] dHash = dHash(currentTransaction);
 			System.out.println("      dHash: " + bytesToString(dHash, 0, dHash.length));
+
+			// Verify transaction
+			// 1. sum of output <= sum of input
+
 		}
-		
+
 		testMerkleTree();
 	}
-	
-	
+
+
 	// This will decrypt the given byte array using the given RSAPublic key and output a byte array
 	public static byte[] decrypt(byte[] text, RSAPublicKey key) {
 		byte[] dectyptedText = null;
-	    try {
-	    	// get an RSA cipher object and print the provider
-	    	final Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-	    	
-	    	// decrypt the text using the given public key
-	    	cipher.init(Cipher.DECRYPT_MODE, key);
-	    	dectyptedText = cipher.doFinal(text);
-	    } catch (Exception ex) {
-	    	ex.printStackTrace();
-	    }
-	    return dectyptedText;
+		try {
+			// get an RSA cipher object and print the provider
+			final Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+
+			// decrypt the text using the given public key
+			cipher.init(Cipher.DECRYPT_MODE, key);
+			dectyptedText = cipher.doFinal(text);
+		} catch (Exception ex) {
+			ex.printStackTrace();
+		}
+		return dectyptedText;
 	}
-	
+
 	//
 	public static byte[] encrypt(String text, RSAPublicKey key) {
-	    byte[] cipherText = null;
-	    try {
-	    	// get an RSA cipher object and print the provider
-	    	final Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-	    	// encrypt the plain text using the public key
-	    	cipher.init(Cipher.ENCRYPT_MODE, key);
-	    	cipherText = cipher.doFinal(text.getBytes());
-	    } catch (Exception e) {
-	    	e.printStackTrace();
-	    }
-	    return cipherText;
-	  }
+		byte[] cipherText = null;
+		try {
+			// get an RSA cipher object and print the provider
+			final Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+			// encrypt the plain text using the public key
+			cipher.init(Cipher.ENCRYPT_MODE, key);
+			cipherText = cipher.doFinal(text.getBytes());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return cipherText;
+	}
 
 	// This method will take care of reading the genesis block
 	public static void readGenesisBlock(byte[] fileBytes) {
@@ -213,13 +218,16 @@ public class BitCoins {
 		// Genesis Transaction
 		byte[] transaction = getByteArr(fileBytes, 86, 40);
 		byte[] transactionDHash = dHash(transaction);
-		System.out.println("   Transaction: dHash (name) = " +
-				bytesToString(transactionDHash, 0, transactionDHash.length));
+		String tx = bytesToString(transactionDHash, 0, transactionDHash.length);
+		System.out.println("   Transaction: dHash (name) = " + tx);
 		System.out.println("      nInputs: " + bytesToShort(fileBytes, 86));
 		System.out.println("      nOutputs: " + bytesToShort(fileBytes, 88));
 		System.out.println("      TxOut");
-		System.out.println("         value: " + bytesToInt(fileBytes, 90));
-		System.out.println("         dHashPublicKey: " + bytesToString(fileBytes, 94, 32));
+		int outputVal = bytesToInt(fileBytes, 90);
+		System.out.println("         value: " + outputVal);
+		String hashedPublicKey = bytesToString(fileBytes, 94, 32);
+		System.out.println("         dHashPublicKey: " + hashedPublicKey);
+		txToOutputSpecifier.put(tx, new OutputSpecifier(outputVal, hashedPublicKey));
 		System.out.println("      Packed bytes: " + bytesToString(fileBytes, 86, 40));
 	}
 
@@ -337,7 +345,7 @@ public class BitCoins {
 		System.out.println("Usage: java BitCoins <hostname> <port> <in-filename> <out-filename>");
 		System.exit(1);
 	}
-	
+
 	/** We borrowed the read() and write() from http://www.javapractices.com/topic/TopicAction.do?Id=245 **/
 
 	/** Read the given binary file, and return its contents as a byte array.*/
