@@ -1,3 +1,8 @@
+import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
+import org.bouncycastle.openssl.PEMException;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
@@ -26,6 +31,10 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openssl.PEMException;
 import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+
+import java.util.ArrayList;
+import java.util.List;
+
 
 import javax.crypto.Cipher;
 import javax.crypto.NoSuchPaddingException;
@@ -136,6 +145,7 @@ public class BitCoins {
 		
 		// Genesis block size
 		//i += 290; // 82 + 4 + 204
+		testMerkleTree();
 		while (i < fileBytes.length) {
 			// Read transactions
 		}
@@ -204,6 +214,57 @@ public class BitCoins {
 		System.out.println("         value: " + bytesToInt(fileBytes, 90));
 		System.out.println("         dHashPublicKey: " + bytesToString(fileBytes, 94, 32));
 		System.out.println("      Packed bytes: " + bytesToString(fileBytes, 86, 40));
+	}
+
+	public static void testMerkleTree() {
+		String a = "a";
+		String b = "five";
+		String c = "word";
+		String d = "input";
+		String e = "example";
+		System.out.println(a + " dHash value = " + bytesToString(dHash(a.getBytes()), 0, 32));
+		System.out.println(b + " dHash value = " + bytesToString(dHash(b.getBytes()), 0, 32));
+		System.out.println(c + " dHash value = " + bytesToString(dHash(c.getBytes()), 0, 32));
+		System.out.println(d + " dHash value = " + bytesToString(dHash(d.getBytes()), 0, 32));
+		System.out.println(e + " dHash value = " + bytesToString(dHash(e.getBytes()), 0, 32));
+		List<byte[]> leafNodes = new ArrayList<byte[]>();
+		leafNodes.add(dHash(a.getBytes()));
+		leafNodes.add(dHash(b.getBytes()));
+		leafNodes.add(dHash(c.getBytes()));
+		leafNodes.add(dHash(d.getBytes()));
+		leafNodes.add(dHash(e.getBytes()));
+		System.out.println("Merkle root: " + bytesToString(merkleTree(leafNodes),0, 32));
+	}
+
+	// Leaf nodes are hashes of the data items
+	public static byte[] merkleTree(List<byte[]> leafNodes) {
+		if (leafNodes.size() == 0) {
+			throw new IllegalArgumentException();
+		}
+		List<byte[]> list1 = leafNodes;
+		List<byte[]> list2 = new ArrayList<byte[]>();
+		while (list1.size() > 1) {
+			for (int i = 0; i < list1.size(); i += 2) {
+				byte[] child1 = list1.get(i);
+				byte[] child2;
+				if (i + 1 < list1.size()) {
+					// If there's two items still
+					child2 = list1.get(i + 1);
+				} else {
+					// If there's only one item left
+					child2 = child1;
+				}
+				byte[] combined = new byte[child1.length * 2];
+				for (int j = 0; j < child1.length; j++) {
+					combined[j] = child1[j];
+					combined[j + child1.length] = child2[j];
+				}
+				list2.add(dHash(combined));
+			}
+			list1 = list2;
+			list2 = new ArrayList<byte[]>();
+		}
+		return list1.get(0);
 	}
 
 	// SHA256(SHA256(buffer))
