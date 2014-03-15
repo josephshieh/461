@@ -17,16 +17,23 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.Reader;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.Security;
+import java.security.Timestamp;
 import java.security.interfaces.RSAPublicKey;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
 import javax.crypto.Cipher;
 
@@ -53,12 +60,17 @@ public class BitCoins {
 		// Read Genesis Block info
 		readGenesisBlock(fileBytes);
 		System.out.println();
+		
+		//write(getByteArr(fileBytes, 0, 126), outFilename);
+		
 		// Transaction Count of the rest
 		int transactionCount = bytesToInt(fileBytes, 126);
 		System.out.println("Transaction count: " + transactionCount);
 
 		int invalidTx = 0;
-		List<byte[]> allTx = new ArrayList<byte[]>();
+		List<byte[]> allTx = new ArrayList<byte[]>(); // dHashed
+		List<byte[]> allFullTxBytes = new ArrayList<byte[]>();
+		long allTxFullLength = 0;
 		i = 130; // Genesis stuff plus transaction count processed
 		// First transaction at index 130
 		List<Integer> notRsa = new ArrayList<Integer>();
@@ -212,12 +224,7 @@ public class BitCoins {
 			byte[] fullTxBytes = getByteArr(fileBytes, startIndex, i - startIndex);
 			byte[] dHashFullTx = dHash(fullTxBytes);
 			String fullTx = bytesToString(dHashFullTx, 0, 32);
-			if (!txToOutputList.containsKey(fullTx)) {
-				txToOutputList.put(fullTx, list);
-				allTx.add(dHashFullTx);
-			} else {
-				invalid = true;
-			}
+			
 
 			if (outputTotal > inputTotal) {
 				invalid = true;
@@ -225,11 +232,120 @@ public class BitCoins {
 
 			if (invalid) {
 				invalidTx++;
+			} else {
+				if (!txToOutputList.containsKey(fullTx)) {
+					txToOutputList.put(fullTx, list);
+					allTx.add(dHashFullTx);
+					allFullTxBytes.add(fullTxBytes);
+					allTxFullLength += fullTxBytes.length;
+				}/* else {
+					invalid = true;
+				}*/
 			}
 		}
 		System.out.println("notRsa count:" + notRsa.size());
 		System.out.println("invalidTx count:" + invalidTx);
+		
+		// Write new file
+		byte[] output = new byte[126 + 82 + 4 + 40 + (int) allTxFullLength];
+		byte[] genesisAll = getByteArr(fileBytes, 0, 126);
+		System.arraycopy(genesisAll, 0, output, 0, genesisAll.length); // write to final output array: Genesis header, trans count, transaction
+		
+		byte[] genesisBlockHeader = getByteArr(fileBytes, 0, 82);
+		byte[] prevBlockRef = dHash(genesisBlockHeader); // 32 bytes
+		
+		byte[] blockOneHeader = new byte[82]; //getByteArr(fileBytes, 0, 82); // can keep first 4 bytes, version
+		
+		byte[] version = intToBytes(1);
+		System.arraycopy(version, 0, blockOneHeader, 0, version.length);
+		
+		System.arraycopy(prevBlockRef, 0, blockOneHeader, 4, prevBlockRef.length); // next 32 bytes
+		
+		
+		SimpleDateFormat sdfDate = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+		Date now = new Date();
+		String strDate = sdfDate.format(now);
+		//System.out.println(strDate);
+		
+		int yr = Integer.parseInt(strDate.split(" ")[0].split("-")[0]);
+		int mo = Integer.parseInt(strDate.split(" ")[0].split("-")[1]) - 1; // month is 0-based index?
+		int da = Integer.parseInt(strDate.split(" ")[0].split("-")[2]);
+		int hr = Integer.parseInt(strDate.split(" ")[1].split(":")[0]);
+		int mi = Integer.parseInt(strDate.split(" ")[1].split(":")[1]);
+		int se = Integer.parseInt(strDate.split(" ")[1].split(":")[2]);
+		//System.out.println(yr + "-" + mo + "-" + da + " " + hr + ":" + mi+ ":" + se );
+		
+		Calendar cal = Calendar.getInstance();
+		cal.clear();
+		cal.set(yr, mo, da, hr, mi, se); // month is 0 based index 2 = Calendar.MARCH
+		//String dateSample = "2014-03-04 18:48:23";
+	    //cal.set(2014, 2, 4, 18, 48, 23); // month is 0 based index 2 = Calendar.MARCH
+		int epochTime = (int) (cal.getTimeInMillis() / 1000L);
+	    System.out.println(epochTime);
+		byte[] creationTime = intToBytes(epochTime);
+		System.arraycopy(creationTime, 0, blockOneHeader, 4 + 32 + 32, creationTime.length); // next 32 bytes
+		
+		short difficulty = 3;
+		byte[] diff = shortToBytes(difficulty);
+		System.arraycopy(diff, 0, blockOneHeader, 4 + 32 + 32 + 4, diff.length); // next 32 bytes
+		
+		byte[] blockOneTransactionCount = intToBytes(transactionCount - invalidTx + 1); // plus coinbase
+		System.arraycopy(blockOneTransactionCount, 0, output, 126 + 82, blockOneTransactionCount.length); // write to final output array
+		
+		byte[] coinbaseTransaction = new byte[40];
+		
+		byte[] nInputs = shortToBytes((short) 0);
+		System.arraycopy(nInputs, 0, output, 126 + 82 + 4, nInputs.length);
+		System.arraycopy(nInputs, 0, coinbaseTransaction, 0, nInputs.length);
+		
+		byte[] nOutputs = shortToBytes((short) 1);
+		System.arraycopy(nOutputs, 0, output, 126 + 82 + 4 + 2, nOutputs.length);
+		System.arraycopy(nOutputs, 0, coinbaseTransaction, 2, nOutputs.length);
+		
+		byte[] value = intToBytes(10 /*+ tips*/);
+		System.arraycopy(value, 0, output, 126 + 82 + 4 + 2 + 2, value.length);
+		System.arraycopy(value, 0, coinbaseTransaction, 2 + 2, value.length);
+		
+		byte[] hashedPublicKey = hexStringToBytes("1f5a0200bc94ae4264642855786d9c2bb436b9e129ef95e6416136c03f339581"); //dHash of our public key, given in spec
+		System.arraycopy(hashedPublicKey, 0, output, 126 + 82 + 4 + 2 + 2 + 4, hashedPublicKey.length);
+		System.arraycopy(hashedPublicKey, 0, coinbaseTransaction, 2 + 2 + 4, hashedPublicKey.length);
+		
+		byte[] dHashCoinbase = dHash(coinbaseTransaction);
+		allTx.add(0, dHashCoinbase);
+		System.out.println("size:" + allTx.size());
 		byte[] merkleRoot = merkleTree(allTx);
+		
+		System.out.println("Merk:" + bytesToString(merkleRoot, 0, 32));
+		System.arraycopy(merkleRoot, 0, blockOneHeader, 4 + 32, merkleRoot.length); // next 32 bytes
+		
+		System.out.println("block:" + bytesToString(blockOneHeader, 0, blockOneHeader.length));
+		
+		byte[] nonce = hexStringToBytes("ccd17b0000000000");
+		System.arraycopy(nonce, 0, blockOneHeader, 74, nonce.length);
+		/*byte[] nonce = null;
+		long counter = 0; // - Math.pow(2, 63)
+		while (!bytesToString(dHash(blockOneHeader), 0, 32).substring(0, 6).equals("000000")) {
+			nonce = longToBytes(counter);
+			System.arraycopy(nonce, 0, blockOneHeader, 74, nonce.length);
+			counter++;
+		}
+		
+		System.out.println("Nonce:" + bytesToString(nonce, 0, 8));
+		System.out.println("Long val of nonce:" + bytesToLong(nonce, 0));*/
+		
+		System.arraycopy(blockOneHeader, 0, output, 126, blockOneHeader.length); // write to final output array
+		
+		int currentOffset = 0;
+		for (int l = 0; l < allFullTxBytes.size(); l++) {
+			byte[] bytes = allFullTxBytes.get(l);
+			System.arraycopy(bytes, 0, output, 126 + 82 + 4 + 40 + currentOffset, bytes.length);
+			currentOffset += bytes.length;
+		}
+		
+		/*write(getByteArr(fileBytes, 0, 126), outFilename);*/
+		write(output, outFilename);
+		
+		
 	}
 
 
@@ -404,6 +520,21 @@ public class BitCoins {
 		}
 		return ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong();
 	}
+	
+	// This method will return a byte array representing the long in little endian order
+	public static byte[] longToBytes(long num) {
+		return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(num).array();
+	}
+	
+	// This method will return a byte array representing the int in little endian order
+	public static byte[] intToBytes(int num) {
+		return ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(num).array();
+	}
+	
+	// This method will return a byte array representing the short in little endian order
+	public static byte[] shortToBytes(short num) {
+		return ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort(num).array();
+	}
 
 	// This method will return the hex byte string from byte array "arr" starting at index "start" for "len" length
 	public static String bytesToString(byte[] arr, int start, int len) {
@@ -415,6 +546,16 @@ public class BitCoins {
 		}
 		return result.toString();
 	}
+	
+	// This method will return the hex byte string from byte array "arr" starting at index "start" for "len" length
+		public static byte[] hexStringToBytes(String str) {
+			byte[] bytes = new byte[str.length() / 2];
+			for (int i = 0; i < str.length(); i += 2) {
+		        bytes[i / 2] = (byte) ((Character.digit(str.charAt(i), 16) << 4)
+		                             + Character.digit(str.charAt(i+1), 16));
+		    }
+			return bytes;
+		}
 
 	// This message will be output if incorrect arguments are provided
 	public static void usage() {
@@ -468,7 +609,7 @@ public class BitCoins {
 	   Write a byte array to the given file.
 	   Writing binary data is significantly simpler than reading it.
 	 */
-	void write(byte[] aInput, String aOutputFileName){
+	public static void write(byte[] aInput, String aOutputFileName){
 		System.out.println("Writing binary file...");
 		try {
 			OutputStream output = null;
